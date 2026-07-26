@@ -7,7 +7,7 @@
 // ════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
 import { Renderer, FOV_BASE, FOV_BOOST } from './render.js';
-import { Ship, FLY } from './ship.js';
+import { Ship, FLY, COCKPIT_EYE } from './ship.js';
 import { Field } from './field.js';
 import { Input } from './input.js';
 import { Debris } from './debris.js';
@@ -93,8 +93,7 @@ function startGame() {
   field.update(ship.pos, 0);
   // mantieni la modalità di vista scelta fra una partita e l'altra
   ship.combat = G.combat;
-  if (ship.canopy)   ship.canopy.visible   = !G.combat;
-  if (ship.frameArc) ship.frameArc.visible = !G.combat;
+  ship.setCockpitView(G.combat);
   document.body.classList.toggle('cockpit', G.combat);
   // posiziona la camera senza interpolazione, per non partire con una spazzata
   camPos.copy(G.combat ? CAM.cockpit : CAM.offset).applyQuaternion(ship.quat).add(ship.pos);
@@ -225,10 +224,9 @@ const CAM = {
   lookAhead: 7.5,
   // COMBATTIMENTO — dentro la cabina, dietro il vetro. Campo visivo più
   // ampio per la consapevolezza, ritardo quasi nullo per la mira.
-  // Posizione dell'occhio del pilota: appena DENTRO la parte anteriore del
-  // tettuccio. Più indietro (era -1.15) la camera finiva dentro la fusoliera
-  // e lo scafo riempiva mezzo schermo.
-  cockpit:   new THREE.Vector3(0, 0.34, -2.15),
+  // Il punto di vista lo definisce ship.js, che lo usa anche per decidere
+  // quali pezzi dello scafo nascondere: deve essere lo stesso valore.
+  cockpit:   COCKPIT_EYE,
   cockRot:   22.0,   // inseguimento della rotazione: quasi istantaneo
   cockFov:   80,
   cockFovBoost: 96,
@@ -455,10 +453,7 @@ function setCombat(on) {
   G.combat = on;
   ship.combat = on;
   document.body.classList.toggle('cockpit', on);
-  // La cabina è trasparente ma il telaio e il muso, visti da dentro a due
-  // centimetri, occuperebbero mezzo schermo: li nascondo.
-  if (ship.canopy)  ship.canopy.visible  = !on;
-  if (ship.frameArc) ship.frameArc.visible = !on;
+  ship.setCockpitView(on);
   // riposiziona subito, senza interpolazione, per evitare una spazzata
   tmpV.copy(on ? CAM.cockpit : CAM.offset).applyQuaternion(ship.quat).add(ship.pos);
   camPos.copy(tmpV);

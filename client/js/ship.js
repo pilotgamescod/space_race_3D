@@ -24,6 +24,16 @@ export const FLY = {
 // Modalità combattimento (vista dalla cabina): la nave diventa nettamente
 // più agile e reattiva. È il senso della modalità — vedi meno, ma manovri
 // molto meglio. In esplorazione vedi tutto ma sei più impastato.
+// Punto di vista del pilota nel sistema di riferimento della nave.
+// Esportato perché main.js e ship.js devono usare ESATTAMENTE lo stesso
+// valore: se divergono, la camera finisce dentro un pezzo che non è stato
+// riconosciuto come ostruzione.
+// Sta appena SOPRA la linea dello scafo, come una cupola: a quell'altezza
+// nessun pezzo della fusoliera contiene il punto di vista, quindi non ci
+// sono pareti interne che spazzano lo schermo quando ruoti. Restano visibili
+// muso e ali, che è ciò che vedresti davvero da una cabina.
+export const COCKPIT_EYE = new THREE.Vector3(0, 0.66, -2.25);
+
 export const COMBAT = {
   yaw:    1.85,   // moltiplicatori sulle velocità angolari
   pitch:  1.85,
@@ -375,7 +385,42 @@ export class Ship {
     // ombre: ogni pezzo della nave proietta e riceve
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
+    this._markCockpitBlockers();
+
     g.position.copy(this.pos);
+  }
+
+  // ─── pezzi da nascondere nella vista dalla cabina ──────────────────
+  // L'occhio del pilota sta DENTRO la fusoliera. I pezzi che lo contengono
+  // vanno nascosti: altrimenti, ruotando, le pareti interne dello scafo
+  // spazzano lo schermo e si sovrappongono fra loro.
+  // Il criterio è geometrico, non per nome: nascondo un pezzo se il punto di
+  // vista cade dentro la sua sfera di ingombro. Così muso, ali e gondole —
+  // che sono davanti o di lato — restano visibili, come da una cabina vera.
+  _markCockpitBlockers() {
+    this.cockpitHidden = [];
+    const eye = COCKPIT_EYE;
+    const c = new THREE.Vector3();
+    this.group.traverse(o => {
+      if (!o.isMesh || !o.geometry) return;
+      if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      const bs = o.geometry.boundingSphere;
+      if (!bs) return;
+      o.updateMatrix();
+      c.copy(bs.center).applyMatrix4(o.matrix);
+      // raggio nel sistema della nave: tiene conto della scala del pezzo
+      const sc = Math.max(
+        Math.abs(o.scale.x), Math.abs(o.scale.y), Math.abs(o.scale.z));
+      const r = bs.radius * sc;
+      if (c.distanceTo(eye) < r * 0.92) this.cockpitHidden.push(o);
+    });
+  }
+
+  // Applica o toglie la vista dalla cabina ai pezzi dello scafo.
+  setCockpitView(on) {
+    if (this.canopy)   this.canopy.visible   = !on;
+    if (this.frameArc) this.frameArc.visible = !on;
+    for (const m of this.cockpitHidden) m.visible = !on;
   }
 
   // ─── modello di volo ────────────────────────────────────────────
