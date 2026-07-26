@@ -206,6 +206,7 @@ input.onKey = (code) => {
     toast('profondità di campo ' + (G.dofOn ? 'attiva' : 'spenta') + '  ·  C');
   }
   if (code === 'KeyM') ui.mute.click();
+  if (code === 'KeyO') { const on = R.toggleAo(); toast('occlusione ambientale ' + (on ? 'attiva' : 'spenta') + '  ·  O'); }
   if (code === 'KeyF') toggleFullscreen();
   if (code === 'KeyV' && (G.state === 'playing' || G.state === 'paused')) setCombat(!G.combat);
   if (code === 'Escape') {
@@ -277,6 +278,7 @@ function frameBody(now) {
   // in pausa anche i detriti si fermano, altrimenti non è una pausa
   if (G.state !== 'paused') debris.update(dt);
   R.syncSky();
+  R.updateShadow(ship.pos);
 
   // scuotimento applicato alla posizione finale della camera
   shake = Math.max(0, shake - dt * 2.2);

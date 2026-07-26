@@ -11,7 +11,6 @@
 //  I massi grandi, se distrutti, si spezzano in frammenti liberi.
 // ════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
-import { rockSet } from './textures.js';
 
 const CHUNK    = 340;   // lato del settore → rocce fino a ~1020 unità
 const RADIUS   = 3;     // settori attivi per lato (7³ = 343 settori)
@@ -42,9 +41,9 @@ function rngFrom(seed) {
 
 // famiglia 0 = roccia, 1 = ghiaccio, 2 = minerale
 const FAMILY = [
-  { name: 'roccia',   base: 0x655f55, spread: 0.22, rough: 0.95, metal: 0.04, emissive: 0x000000, ei: 0,    weight: 0.68 },
-  { name: 'ghiaccio', base: 0x8fb0c2, spread: 0.14, rough: 0.34, metal: 0.10, emissive: 0x0a2430, ei: 0.35, weight: 0.20 },
-  { name: 'minerale', base: 0x503f32, spread: 0.18, rough: 0.62, metal: 0.45, emissive: 0x8f3a0c, ei: 0.50, weight: 0.12 },
+  { name: 'roccia',   base: 0xb4aca0, spread: 0.22, rough: 0.95, metal: 0.04, emissive: 0x000000, ei: 0,    weight: 0.68 },
+  { name: 'ghiaccio', base: 0xa8cadf, spread: 0.14, rough: 0.34, metal: 0.10, emissive: 0x0a2430, ei: 0.35, weight: 0.20 },
+  { name: 'minerale', base: 0x8f6b48, spread: 0.18, rough: 0.62, metal: 0.45, emissive: 0x8f3a0c, ei: 0.50, weight: 0.12 },
 ];
 
 export class Field {
@@ -125,10 +124,31 @@ export class Field {
     });
     this._variants = geos.length;
 
-    // Tre superfici rocciose: crateri, screziature, grana e RILIEVO vero
-    // (normal map). Senza texture le meteore sembrano poliedri di plastica,
-    // per irregolare che sia la loro sagoma.
-    const surf = [rockSet(3, 512), rockSet(97, 512), rockSet(151, 512)];
+    // Superfici da SCANSIONE FOTOGRAMMETRICA di roccia vera (ambientCG, CC0):
+    // colore, normali, rugosità e occlusione. Le mie texture disegnate su
+    // canvas erano un'approssimazione; questi sono dati misurati da pietra
+    // reale, e la differenza si vede tutta sui bordi e nei crateri.
+    const tl = new THREE.TextureLoader();
+    const load = (file, srgb, rep) => {
+      const t = tl.load('./assets/tex/' + file);
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 8;
+      t.repeat.set(rep, rep);
+      // l'occlusione userebbe di default un secondo set di coordinate UV che
+      // le nostre geometrie non hanno: la rimando sul primo
+      t.channel = 0;
+      return t;
+    };
+    const set = (pref, rep) => ({
+      map:          load(`${pref}_col.jpg`, true,  rep),
+      normalMap:    load(`${pref}_nrm.jpg`, false, rep),
+      roughnessMap: load(`${pref}_rgh.jpg`, false, rep),
+      aoMap:        load(`${pref}_ao.jpg`,  false, rep),
+    });
+    // la terza variante riusa la prima con una scala diversa: cambia la grana
+    // percepita senza costare un altro download
+    const surf = [set('rock_a', 1), set('rock_b', 1), set('rock_a', 2.4)];
 
     const out = [];
     for (let f = 0; f < FAMILY.length; f++) {
@@ -140,9 +160,10 @@ export class Field {
           color: 0xffffff,            // il colore vero arriva da instanceColor
           roughness: F.rough, metalness: F.metal,
           emissive: F.emissive, emissiveIntensity: F.ei,
-          flatShading: v === 0,       // la variante spigolosa sfaccettata
-          map: s.map, roughnessMap: s.roughnessMap, normalMap: s.normalMap,
-          normalScale: new THREE.Vector2(1.15, 1.15),
+          flatShading: false,         // le normal map fanno il lavoro meglio
+          map: s.map, roughnessMap: s.roughnessMap,
+          normalMap: s.normalMap, aoMap: s.aoMap, aoMapIntensity: 1.0,
+          normalScale: new THREE.Vector2(1.4, 1.4),
         });
         const im = new THREE.InstancedMesh(geos[v], mat, CAPACITY);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -150,6 +171,8 @@ export class Field {
         im.instanceColor.setUsage(THREE.DynamicDrawUsage);
         im.count = 0;
         im.frustumCulled = false;
+        im.castShadow = true;      // le rocce proiettano ombra…
+        im.receiveShadow = true;   // …e la ricevono l'una dall'altra
         this.scene.add(im);
         out[f][v] = im;
       }

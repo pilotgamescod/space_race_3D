@@ -6,6 +6,7 @@
 //  segnale che rende leggibile il combattimento.
 // ════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
+import { panelSet, glowTexture } from './textures.js';
 
 export const SENT = {
   hp:          4,
@@ -16,65 +17,185 @@ export const SENT = {
   telegraph:   0.45,   // preavviso prima del colpo
   turnRate:    2.2,
   damage:      12,
-  radius:      3.4,
+  radius:      4.2,   // scafo dell'intercettore, non più un nucleo sferico
   scoreValue:  150,
 };
 
+// Materiali e texture condivisi da TUTTE le sentinelle: generarli per ogni
+// nemico che compare costerebbe una pausa visibile a ogni spawn.
+let SHARED = null;
+function shared() {
+  if (SHARED) return SHARED;
+  const skin = panelSet(77, 512, { wear: 0.8, density: 6 });
+  const rep = (u, v) => {
+    const o = {};
+    for (const k of ['map', 'roughnessMap', 'normalMap']) {
+      o[k] = skin[k].clone(); o[k].needsUpdate = true; o[k].repeat.set(u, v);
+    }
+    return o;
+  };
+  SHARED = {
+    // scafo alieno: grigio-verde scuro, sporco, opaco
+    shell: new THREE.MeshStandardMaterial({
+      color: 0x4a5148, roughness: 0.66, metalness: 0.26,
+      normalScale: new THREE.Vector2(1.0, 1.0), ...rep(2, 2) }),
+    plate: new THREE.MeshStandardMaterial({
+      color: 0x5b6358, roughness: 0.52, metalness: 0.38,
+      normalScale: new THREE.Vector2(0.8, 0.8), ...rep(3, 3) }),
+    trim:  new THREE.MeshStandardMaterial({ color: 0x8b8478, roughness: 0.44, metalness: 0.70 }),
+    dark:  new THREE.MeshStandardMaterial({ color: 0x1c211f, roughness: 0.62, metalness: 0.30 }),
+    // marcatura d'unità: dà l'idea di un mezzo militare, non di un oggetto
+    mark:  new THREE.MeshStandardMaterial({ color: 0x8c2a12, roughness: 0.55, metalness: 0.30 }),
+    glowTex: glowTexture(128),
+  };
+  return SHARED;
+}
+
+// ─── INTERCETTORE ────────────────────────────────────────────────────
+// Punta lungo -Z locale, come la nave del giocatore. Doppia fusoliera con
+// carena centrale, muso sensore, quattro cannoni e due propulsori: deve
+// leggersi come un mezzo pilotato, non come un oggetto astratto.
 function buildMesh() {
+  const M = shared();
   const g = new THREE.Group();
 
-  // Anche qui metalness contenuta: i nemici devono restare più scuri della
-  // nave del giocatore, ma leggibili come volume, non come sagome nere.
-  const shell = new THREE.MeshStandardMaterial({ color: 0x353d47, roughness: 0.52, metalness: 0.28 });
-  const plate = new THREE.MeshStandardMaterial({ color: 0x454f5b, roughness: 0.46, metalness: 0.42 });
+  // ── carena centrale ──
+  const belly = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.25, 3.4, 6, 1), M.shell);
+  belly.rotation.x = -Math.PI / 2; belly.rotation.z = Math.PI / 6;
+  belly.scale.set(1.35, 1, 0.62);
+  g.add(belly);
 
-  // nucleo: due tronchi di cono uniti, sembra un guscio chiuso
-  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1, 1), shell);
-  g.add(core);
+  // cresta dorsale
+  const crest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.68, 2.4), M.plate);
+  crest.position.set(0, 0.66, 0.35);
+  g.add(crest);
 
-  // piastre esterne, disposte a spicchi
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    const p = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.28, 2.4), plate);
-    p.position.set(Math.cos(a) * 1.85, 0, Math.sin(a) * 1.85);
-    p.rotation.y = -a;
-    p.rotation.z = 0.22;
-    g.add(p);
-  }
+  // ── prua sensore: cuneo appiattito ──
+  const prow = new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.6, 5), M.plate);
+  prow.rotation.x = -Math.PI / 2; prow.rotation.z = Math.PI / 5;
+  prow.scale.set(1.3, 1, 0.55);
+  prow.position.z = -2.6;
+  g.add(prow);
 
-  // occhio emissivo
+  // ── occhio: il sensore che si carica prima di sparare ──
   const eyeMat = new THREE.MeshStandardMaterial({
-    color: 0x120404, emissive: 0xff3a1a, emissiveIntensity: 4.2,
-    roughness: 0.2, metalness: 0.1, fog: false
+    color: 0x140303, emissive: 0xd41c08, emissiveIntensity: 1.3,
+    roughness: 0.16, metalness: 0.1, fog: false
   });
-  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.72, 20, 14), eyeMat);
-  eye.position.z = -1.75;
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.34, 22, 14), eyeMat);
+  eye.position.set(0, 0.06, -3.35);
+  eye.scale.set(1.5, 0.85, 1);
   g.add(eye);
+  // cornice attorno all'occhio, come una palpebra corazzata
+  const brow = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.08, 5, 18), M.trim);
+  brow.position.set(0, 0.06, -3.3); brow.scale.set(1.4, 0.9, 1);
+  g.add(brow);
 
-  // alone dell'occhio: sprite additivo, si accende col preavviso
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    color: 0xff5a30, transparent: true, opacity: 0.5,
+    map: M.glowTex,        // senza map lo sprite e' un QUADRATO pieno
+    color: 0xff5a30, transparent: true, opacity: 0.42,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false
   }));
-  glow.scale.setScalar(5.5);
-  glow.position.z = -1.9;
+  glow.scale.setScalar(2.6);
+  glow.position.set(0, 0.06, -3.6);
   g.add(glow);
 
-  // due anelli orbitanti su assi diversi
   const rings = [];
-  for (let i = 0; i < 2; i++) {
-    const r = new THREE.Mesh(
-      new THREE.TorusGeometry(3.3 + i * 0.9, 0.13, 6, 40),
-      new THREE.MeshStandardMaterial({
-        color: 0x3a4550, roughness: 0.3, metalness: 0.95,
-        emissive: 0x0a2230, emissiveIntensity: 1.2
-      })
-    );
-    r.rotation.x = i === 0 ? Math.PI / 2 : 0.5;
-    r.rotation.z = i === 0 ? 0 : 0.9;
-    g.add(r);
-    rings.push(r);
+  for (const s of [1, -1]) {
+    // ── fusoliera laterale ──
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.52, 4.6, 8), M.shell);
+    pod.rotation.x = -Math.PI / 2;
+    pod.position.set(s * 1.9, -0.10, 0.2);
+    g.add(pod);
+    // punta della fusoliera
+    const podNose = new THREE.Mesh(new THREE.ConeGeometry(0.40, 1.5, 8), M.plate);
+    podNose.rotation.x = -Math.PI / 2;
+    podNose.position.set(s * 1.9, -0.10, -3.0);
+    g.add(podNose);
+
+    // ── braccio che collega la fusoliera alla carena ──
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.34, 1.5), M.plate);
+    arm.position.set(s * 1.05, -0.06, 0.5);
+    arm.rotation.z = s * 0.10;
+    g.add(arm);
+
+    // ── ala a falce, inclinata in avanti ──
+    const wing = new THREE.Shape();
+    wing.moveTo(0.0,  0.55);
+    wing.lineTo(1.85, 1.30);   // freccia INVERTITA: profilo aggressivo
+    wing.lineTo(2.05, 0.55);
+    wing.lineTo(0.0, -0.85);
+    wing.closePath();
+    const wingGeo = new THREE.ExtrudeGeometry(wing, {
+      depth: 0.20, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 1
+    });
+    const wingMat = M.shell.clone(); wingMat.side = THREE.DoubleSide;
+    const w = new THREE.Mesh(wingGeo, wingMat);
+    w.rotation.x = -Math.PI / 2;
+    w.rotation.z = s * -0.16;
+    w.scale.x = s;
+    w.position.set(s * 2.15, -0.12, 0.3);
+    g.add(w);
+
+    // pinna verticale sulla punta dell'ala
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.05, 0.85), M.plate);
+    fin.position.set(s * 4.05, 0.35, 1.05);
+    fin.rotation.z = s * -0.22;
+    g.add(fin);
+
+    // ── cannoni: due per lato, sotto la fusoliera ──
+    for (const o of [-0.22, 0.22]) {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.11, 2.6, 7), M.trim);
+      barrel.rotation.x = -Math.PI / 2;
+      barrel.position.set(s * 1.9 + o, -0.48, -1.9);
+      g.add(barrel);
+    }
+    const gunPod = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.34, 1.3), M.dark);
+    gunPod.position.set(s * 1.9, -0.46, -0.5);
+    g.add(gunPod);
+
+    // ── propulsore ──
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.34, 0.9, 10, 1, true), M.dark);
+    nozzle.rotation.x = -Math.PI / 2;
+    nozzle.position.set(s * 1.9, -0.10, 2.75);
+    nozzle.material = M.dark.clone(); nozzle.material.side = THREE.DoubleSide;
+    g.add(nozzle);
+    // nucleo caldo del propulsore: emissivo, il bloom lo trasforma in luce
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: 0x120604, emissive: 0xff5518, emissiveIntensity: 3.2,
+      roughness: 0.4, fog: false
+    });
+    const core = new THREE.Mesh(new THREE.CircleGeometry(0.33, 14), glowMat);
+    core.position.set(s * 1.9, -0.10, 3.16);
+    core.rotation.y = Math.PI;
+    g.add(core);
+    rings.push(core);   // riusati per pulsare col preavviso
+
+    // marcature d'unità
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.30), M.mark);
+    stripe.position.set(s * 1.9, 0.40, -0.9);
+    g.add(stripe);
+
+    // minutaglia tecnica sulla fusoliera
+    for (let i = 0; i < 4; i++) {
+      const bx = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14 + Math.random() * 0.18, 0.10, 0.20 + Math.random() * 0.26),
+        i % 2 ? M.trim : M.dark);
+      bx.position.set(s * (1.75 + Math.random() * 0.3), 0.32, -1.6 + Math.random() * 3.4);
+      g.add(bx);
+    }
   }
+
+  // antenne sulla cresta
+  for (const s of [1, -1]) {
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.035, 1.3, 5), M.trim);
+    ant.position.set(s * 0.2, 1.2, 0.9);
+    ant.rotation.z = s * 0.22; ant.rotation.x = 0.16;
+    g.add(ant);
+  }
+
+  // ombre: i nemici proiettano e ricevono come tutto il resto
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
   return { group: g, eyeMat, glow, rings };
 }
@@ -157,16 +278,18 @@ export class Enemies {
       e.group.position.copy(e.pos);
       e.group.quaternion.copy(e.quat);
 
-      // anelli in rotazione continua
-      e.rings[0].rotation.z += e.spin[0] * dt;
-      e.rings[1].rotation.y += e.spin[1] * dt;
+      // i propulsori pulsano: più caldi quando la sentinella si avvicina
+      const push = dist < SENT.aggroDist ? 1 : 0.35;
+      for (const core of e.rings) {
+        core.material.emissiveIntensity = 2.2 + push * 2.0 + Math.sin(performance.now()/120 + e.spin[0]*9) * 0.5;
+      }
 
       // l'occhio si carica: da rosso a bianco incandescente
       const t = e.tele;
-      e.eyeMat.emissiveIntensity = 3.0 + t * 12;
-      e.eyeMat.emissive.setRGB(1, 0.22 + t * 0.7, 0.10 + t * 0.75);
-      e.glow.scale.setScalar(5.0 + t * 7);
-      e.glow.material.opacity = 0.4 + t * 0.5;
+      e.eyeMat.emissiveIntensity = 1.2 + t * 3.4;
+      e.eyeMat.emissive.setRGB(0.85, 0.10 + t * 0.55, 0.03 + t * 0.45);
+      e.glow.scale.setScalar(2.4 + t * 2.6);
+      e.glow.material.opacity = 0.34 + t * 0.40;
 
       if (e.hitFlash > 0) {
         e.hitFlash -= dt;

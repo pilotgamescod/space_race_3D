@@ -372,6 +372,9 @@ export class Ship {
     this.engineLight.position.set(0, -0.06, 4.5);
     g.add(this.engineLight);
 
+    // ombre: ogni pezzo della nave proietta e riceve
+    g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
     g.position.copy(this.pos);
   }
 

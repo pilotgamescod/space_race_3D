@@ -337,3 +337,25 @@ export function techSet(seed = 21, size = 512) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
+
+/**
+ * Alone radiale morbido per gli sprite luminosi.
+ *
+ * Serve perché uno SpriteMaterial SENZA `map` disegna un quadrato pieno, non
+ * un bagliore: era il rettangolo arancione che copriva le sentinelle.
+ */
+export function glowTexture(size = 128) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const c = cv.getContext('2d');
+  const g = c.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  g.addColorStop(0.00, 'rgba(255,255,255,1)');
+  g.addColorStop(0.18, 'rgba(255,255,255,0.72)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.20)');
+  g.addColorStop(1.00, 'rgba(255,255,255,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}

@@ -11,6 +11,8 @@ import { UnrealBloomPass }  from 'three/addons/postprocessing/UnrealBloomPass.js
 import { BokehPass }        from 'three/addons/postprocessing/BokehPass.js';
 import { FilmPass }         from 'three/addons/postprocessing/FilmPass.js';
 import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass }         from 'three/addons/postprocessing/GTAOPass.js';
+import { SMAAPass }         from 'three/addons/postprocessing/SMAAPass.js';
 
 export const FOV_BASE  = 64;
 export const FOV_BOOST = 82;
@@ -29,6 +31,8 @@ export class Renderer {
     // invece di "disegnata". Senza tone mapping gli emissivi bruciano piatti.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene  = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(FOV_BASE, innerWidth / innerHeight, 0.35, 40000);
@@ -52,8 +56,25 @@ export class Renderer {
   _buildLights() {
     // La stella: direzionale, bianca leggermente calda, molto intensa.
     this.star = new THREE.DirectionalLight(0xfff2e0, 2.9);
-    this.star.position.set(-0.45, 0.32, 0.83).normalize().multiplyScalar(1000);
+    this.starDir = new THREE.Vector3(-0.45, 0.32, 0.83).normalize();
+    this.star.position.copy(this.starDir).multiplyScalar(1000);
     this.scene.add(this.star);
+    this.scene.add(this.star.target);
+
+    // ── ombre ──
+    // Una sorgente di luce senza ombre lascia gli oggetti "appiccicati" sopra
+    // lo sfondo. Il tronco di vista dell'ombra è volutamente STRETTO e segue
+    // la nave (vedi updateShadow): coprire tutto il campo di asteroidi con una
+    // sola mappa darebbe ombre sgranate e inutili.
+    this.star.castShadow = true;
+    this.star.shadow.mapSize.set(2048, 2048);
+    const S = 95;
+    const sc = this.star.shadow.camera;
+    sc.left = -S; sc.right = S; sc.top = S; sc.bottom = -S;
+    sc.near = 1; sc.far = 900;
+    this.star.shadow.bias = -0.0006;
+    this.star.shadow.normalBias = 0.04;   // evita l'acne d'ombra sulle rocce
+    sc.updateProjectionMatrix();
 
     // Riempimento minimo, freddo: nello spazio la luce di rimbalzo è quasi
     // nulla, ma a zero le facce in ombra diventano nero assoluto e la forma
@@ -69,49 +90,64 @@ export class Renderer {
   // mappa equirettangolare procedurale (fondo freddo + la stella calda) e la
   // passo per PMREM, che la trasforma nella mappa sfocata per i riflessi.
   _buildEnvironment() {
-    const W = 512, H = 256;
-    const cv = document.createElement('canvas');
-    cv.width = W; cv.height = H;
-    const x = cv.getContext('2d');
+    // Generata come DataTexture a VIRGOLA MOBILE, non su canvas.
+    // È la differenza decisiva: un canvas è a 8 bit, quindi il valore massimo
+    // è 1 e la "stella" non è realmente più luminosa di una parete bianca.
+    // In HDR la stella vale centinaia, e i metalli hanno finalmente qualcosa
+    // di brillante da riflettere — è da lì che nasce il riflesso speculare.
+    const W = 256, H = 128;
+    const data = new Float32Array(W * H * 4);
+    const d = this.star.position.clone().normalize();
+    const dir = new THREE.Vector3();
 
-    // fondo: azzurro cupo in alto, quasi nero in basso
-    const bg = x.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0.00, '#0d1726');
-    bg.addColorStop(0.45, '#070c14');
-    bg.addColorStop(1.00, '#03050a');
-    x.fillStyle = bg; x.fillRect(0, 0, W, H);
+    // nebulose in coordinate direzionali, per tingere i riflessi
+    const clouds = [
+      { dir: new THREE.Vector3( 0.7, 0.25, -0.6).normalize(), col: [0.030, 0.055, 0.130], w: 0.9 },
+      { dir: new THREE.Vector3(-0.6, -0.1,  0.75).normalize(), col: [0.075, 0.030, 0.095], w: 1.1 },
+      { dir: new THREE.Vector3( 0.1, -0.8, -0.3).normalize(), col: [0.020, 0.060, 0.070], w: 1.3 },
+    ];
 
-    // macchie di nebulosa: danno variazione ai riflessi sulle superfici curve
-    for (const [u, v, r, col] of [
-      [0.20, 0.35, 0.30, 'rgba(40,70,140,0.5)'],
-      [0.70, 0.55, 0.34, 'rgba(90,45,110,0.4)'],
-      [0.45, 0.75, 0.26, 'rgba(30,80,90,0.35)'],
-    ]) {
-      const g = x.createRadialGradient(u*W, v*H, 0, u*W, v*H, r*W);
-      g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
-      x.fillStyle = g; x.fillRect(0, 0, W, H);
+    for (let y = 0; y < H; y++) {
+      const v = (y + 0.5) / H;
+      const dy = Math.sin((0.5 - v) * Math.PI);
+      const c = Math.sqrt(Math.max(0, 1 - dy * dy));
+      for (let x = 0; x < W; x++) {
+        const u = (x + 0.5) / W;
+        const phi = (u - 0.5) * Math.PI * 2;
+        dir.set(c * Math.sin(phi), dy, -c * Math.cos(phi));
+
+        // fondo: appena più chiaro verso l'alto, quasi nero sotto
+        let r = 0.0045 + dy * 0.006;
+        let g = 0.0075 + dy * 0.009;
+        let b = 0.0170 + dy * 0.016;
+
+        for (const n of clouds) {
+          const t = Math.max(0, dir.dot(n.dir));
+          const f = Math.pow(t, 2.2) * n.w;
+          r += n.col[0] * f; g += n.col[1] * f; b += n.col[2] * f;
+        }
+
+        // la stella: disco stretto molto intenso più un alone largo tenue
+        const ang = Math.acos(Math.min(1, Math.max(-1, dir.dot(d))));
+        const disc = ang < 0.035 ? 420 : 0;
+        const halo = 26 * Math.exp(-(ang * ang) / 0.010) + 1.5 * Math.exp(-(ang * ang) / 0.22);
+        const s = disc + halo;
+        r += s * 1.00; g += s * 0.955; b += s * 0.880;   // bianco leggermente caldo
+
+        const i = (y * W + x) * 4;
+        data[i] = r; data[i+1] = g; data[i+2] = b; data[i+3] = 1;
+      }
     }
 
-    // la stella, nella stessa direzione della luce direzionale
-    const d = this.star.position.clone().normalize();
-    const su = 0.5 + Math.atan2(d.x, -d.z) / (Math.PI * 2);
-    const sv = 0.5 - Math.asin(d.y) / Math.PI;
-    const sg = x.createRadialGradient(su*W, sv*H, 0, su*W, sv*H, W*0.11);
-    sg.addColorStop(0.00, '#ffffff');
-    sg.addColorStop(0.10, '#fff4e2');
-    sg.addColorStop(0.35, 'rgba(255,210,160,0.35)');
-    sg.addColorStop(1.00, 'rgba(255,190,130,0)');
-    x.fillStyle = sg; x.fillRect(0, 0, W, H);
-
-    const tex = new THREE.CanvasTexture(cv);
+    const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
     tex.mapping = THREE.EquirectangularReflectionMapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     pmrem.compileEquirectangularShader();
     this.envMap = pmrem.fromEquirectangular(tex).texture;
     this.scene.environment = this.envMap;
-    this.scene.environmentIntensity = 0.6;
+    this.scene.environmentIntensity = 1.0;
     pmrem.dispose();
     tex.dispose();
   }
@@ -306,6 +342,18 @@ export class Renderer {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
+    // Occlusione ambientale: scurisce gli incavi e i punti di contatto fra
+    // superfici. È ciò che smette di far sembrare gli oggetti incollati sopra
+    // lo sfondo e dà volume alle fessure fra i pannelli e nei crateri.
+    this.gtao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
+    this.gtao.output = GTAOPass.OUTPUT.Default;
+    this.gtao.updateGtaoMaterial({
+      radius: 0.55, distanceExponent: 1.4, thickness: 1.2,
+      scale: 1.0, samples: 12, screenSpaceRadius: false,
+    });
+    this.gtao.blendIntensity = 0.85;
+    this.composer.addPass(this.gtao);
+
     // ATTENZIONE alla soglia: agisce sui valori HDR LINEARI, prima del tone
     // mapping — non su quello che vedi a schermo. Lo scafo illuminato vale
     // ~1.5 in lineare pur apparendo grigio medio, quindi con soglia 0.96
@@ -326,9 +374,16 @@ export class Renderer {
     // Grana pellicola tenuta bassissima: appena rompe la pulizia digitale.
     this.composer.addPass(new FilmPass(0.14));
     this.composer.addPass(new OutputPass());
+
+    // SMAA in coda, dopo la conversione a sRGB: l'antialiasing va fatto sui
+    // valori finali, altrimenti i bordi ad alto contrasto restano scalettati
+    // nonostante l'antialiasing del contesto WebGL.
+    this.smaa = new SMAAPass();
+    this.composer.addPass(this.smaa);
   }
 
   toggleDof() { this.bokeh.enabled = !this.bokeh.enabled; return this.bokeh.enabled; }
+  toggleAo()  { this.gtao.enabled  = !this.gtao.enabled;  return this.gtao.enabled; }
 
   // Mette a fuoco il soggetto, così la sfocatura tocca solo il fondo.
   setFocus(dist) {
@@ -343,6 +398,7 @@ export class Renderer {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
+    if (this.gtao) this.gtao.setSize(w, h);
     this.stars.material.uniforms.uScale.value = h / 2;
   }
 
@@ -350,6 +406,15 @@ export class Renderer {
   // si "avvicina" mai, che è l'errore classico dei fondali stellati.
   syncSky() {
     this.skyGroup.position.copy(this.camera.position);
+  }
+
+  // La mappa d'ombra segue il giocatore: la luce resta a distanza fissa nella
+  // sua direzione e punta sempre dove sei tu, così i 2048 pixel della mappa
+  // sono spesi tutti sulla porzione di spazio che stai guardando.
+  updateShadow(target) {
+    this.star.target.position.copy(target);
+    this.star.position.copy(this.starDir).multiplyScalar(420).add(target);
+    this.star.target.updateMatrixWorld();
   }
 
   // EffectComposer chiama render() una volta per passaggio, e ogni chiamata
