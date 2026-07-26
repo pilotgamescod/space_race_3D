@@ -412,7 +412,9 @@ export class Ship {
       const sc = Math.max(
         Math.abs(o.scale.x), Math.abs(o.scale.y), Math.abs(o.scale.z));
       const r = bs.radius * sc;
-      if (c.distanceTo(eye) < r * 0.92) this.cockpitHidden.push(o);
+      // margine assoluto oltre al raggio: copre i pezzi che *sfiorano* il
+      // punto di vista, che sono quelli che spuntavano nelle virate
+      if (c.distanceTo(eye) < r * 0.95 + 0.45) this.cockpitHidden.push(o);
     });
   }
 

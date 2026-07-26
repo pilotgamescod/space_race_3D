@@ -14,6 +14,8 @@ import { Debris } from './debris.js';
 import { Weapons, GUN } from './weapons.js';
 import { Enemies, SENT } from './enemies.js';
 import { Audio } from './audio.js';
+import { Scenery } from './scenery.js';
+import { renderHangar } from './hangar.js';
 
 const $ = (id) => document.getElementById(id);
 const bootBar = $('boot-bar'), bootMsg = $('boot-msg');
@@ -34,7 +36,10 @@ const audio = new Audio();
 const field = new Field(R.scene, debris, audio);
 field.update(ship.pos, 0);
 
-step(78, 'armamento e ostili');
+step(72, 'scenario del cosmo');
+const scenery = new Scenery(R.scene, R.skyGroup);
+
+step(80, 'armamento e ostili');
 const weapons = new Weapons(R.scene);
 const enemies = new Enemies(R.scene, debris, audio);
 
@@ -52,6 +57,7 @@ const G = {
   time: 0,
   spawnTimer: 6,
   best: +(localStorage.getItem('sr3d_best') || 0),
+  shipId: localStorage.getItem('sr3d_ship') || 'lancer',
   dofOn: false,
   muted: localStorage.getItem('sr3d_mute') === '1',
 };
@@ -69,7 +75,6 @@ const ui = {
   menuBest: $('menu-best'),
   ovScore: $('ov-score'), ovKills: $('ov-kills'), ovRocks: $('ov-rocks'), ovTime: $('ov-time'), ovBest: $('ov-best'),
   flash: $('flash'), warn: $('warn'),
-  mute: $('btn-mute'),
 };
 
 function setState(s) {
@@ -84,6 +89,7 @@ function setState(s) {
 }
 
 function startGame() {
+  closeSheet();
   audio.init();               // richiede un gesto utente: siamo dentro un click
   ship.reset();
   field.reset();
@@ -125,14 +131,12 @@ const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).pad
 $('btn-start').addEventListener('click', startGame);
 $('btn-retry').addEventListener('click', startGame);
 $('btn-menu').addEventListener('click',  () => setState('menu'));
-ui.mute.addEventListener('click', () => {
+function toggleMute() {
   G.muted = !G.muted;
   audio.setMuted(G.muted);
   localStorage.setItem('sr3d_mute', G.muted ? '1' : '0');
-  ui.mute.textContent = G.muted ? 'audio disattivato' : 'audio attivo';
   toast(G.muted ? 'audio disattivato  ·  M' : 'audio attivo  ·  M');
-});
-ui.mute.textContent = G.muted ? 'audio disattivato' : 'audio attivo';
+}
 
 // ─── schermo intero ─────────────────────────────────────────────────
 // Va invocato da un gesto dell'utente, altrimenti il browser lo rifiuta.
@@ -146,12 +150,10 @@ function toggleFullscreen() {
     (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   }
 }
-function syncFsLabel() {
-  const on = !!document.fullscreenElement;
-  $('btn-fs').textContent = on ? 'esci da schermo intero' : 'schermo intero';
-}
-document.addEventListener('fullscreenchange', syncFsLabel);
-$('btn-fs').addEventListener('click', toggleFullscreen);
+// lo stato dello schermo intero si riflette nel pannello impostazioni
+document.addEventListener('fullscreenchange', () => {
+  if (typeof syncOptions === 'function') syncOptions();
+});
 
 // ─── avvisi a schermo ───────────────────────────────────────────────
 // Servono perché un'impostazione attivata da tastiera senza riscontro
@@ -199,12 +201,80 @@ $('btn-resume').addEventListener('click', resumeGame);
 $('btn-view').addEventListener('click', () => setCombat(!G.combat));
 $('btn-abandon').addEventListener('click', abandonMission);
 
+// ═══ PANNELLI: istruzioni / navicelle / impostazioni ═══════════════
+const sheet = $('sheet');
+let sheetOpen = false;
+
+function openSheet(tab) {
+  sheetOpen = true;
+  sheet.classList.add('on');
+  showTab(tab || 'help');
+  document.body.style.cursor = 'default';
+}
+function closeSheet() {
+  sheetOpen = false;
+  sheet.classList.remove('on');
+  if (G.state === 'playing') document.body.style.cursor = 'none';
+}
+function showTab(name) {
+  for (const b of document.querySelectorAll('.stab')) {
+    b.classList.toggle('on', b.dataset.tab === name);
+  }
+  for (const p of document.querySelectorAll('[data-panel]')) {
+    p.hidden = p.dataset.panel !== name;
+  }
+  if (name === 'hangar') drawHangar();
+  if (name === 'settings') syncOptions();
+}
+for (const b of document.querySelectorAll('.stab')) {
+  b.addEventListener('click', () => showTab(b.dataset.tab));
+}
+$('sheet-close').addEventListener('click', closeSheet);
+$('btn-help').addEventListener('click',     () => openSheet('help'));
+$('btn-hangar').addEventListener('click',   () => openSheet('hangar'));
+$('btn-settings').addEventListener('click', () => openSheet('settings'));
+$('gear').addEventListener('click', () => {
+  if (G.state === 'playing') pauseGame();
+  openSheet('settings');
+});
+$('btn-pause-help').addEventListener('click', () => openSheet('help'));
+
+// ── catalogo navicelle ──
+function drawHangar() {
+  renderHangar($('ship-list'), G.shipId, (id) => {
+    G.shipId = id;
+    localStorage.setItem('sr3d_ship', id);
+    drawHangar();
+    toast('navicella selezionata: ' + id);
+  });
+}
+
+// ── opzioni ──
+function syncOptions() {
+  const set = (el, on, onTxt, offTxt) => {
+    el.textContent = on ? onTxt : offTxt;
+    el.classList.toggle('on', on);
+  };
+  set($('opt-ao'),    R.gtao.enabled,        'attiva', 'spenta');
+  set($('opt-dof'),   R.bokeh.enabled,       'attiva', 'spenta');
+  set($('opt-fs'),    !!document.fullscreenElement, 'attivo', 'spento');
+  set($('opt-audio'), !G.muted,              'attivo', 'spento');
+}
+$('opt-ao').addEventListener('click',    () => { R.toggleAo();  syncOptions(); });
+$('opt-dof').addEventListener('click',   () => { R.toggleDof(); syncOptions(); });
+$('opt-fs').addEventListener('click',    () => { toggleFullscreen(); setTimeout(syncOptions, 200); });
+$('opt-audio').addEventListener('click', () => { toggleMute(); syncOptions(); });
+
 input.onKey = (code) => {
+  if (sheetOpen) {                      // col pannello aperto i tasti di gioco
+    if (code === 'Escape') closeSheet(); // non devono agire
+    return;
+  }
   if (code === 'KeyC') {
     G.dofOn = R.toggleDof();
     toast('profondità di campo ' + (G.dofOn ? 'attiva' : 'spenta') + '  ·  C');
   }
-  if (code === 'KeyM') ui.mute.click();
+  if (code === 'KeyM') toggleMute();
   if (code === 'KeyO') { const on = R.toggleAo(); toast('occlusione ambientale ' + (on ? 'attiva' : 'spenta') + '  ·  O'); }
   if (code === 'KeyF') toggleFullscreen();
   if (code === 'KeyV' && (G.state === 'playing' || G.state === 'paused')) setCombat(!G.combat);
@@ -417,12 +487,17 @@ function updatePlaying(dt) {
 // ─── telecamera: due modalità ───────────────────────────────────────
 function updateCamera(dt) {
   if (G.combat) {
-    // Dentro la cabina: la camera è solidale alla nave, con un filo di
-    // ritardo per non essere rigida come un blocco di ferro.
-    tmpV.copy(CAM.cockpit).applyQuaternion(ship.quat).add(ship.pos);
-    camPos.lerp(tmpV, 1 - Math.exp(-26 * dt));
+    // In cabina la camera è RIGIDAMENTE solidale alla nave: nessun ritardo,
+    // nessuna interpolazione.
+    //
+    // Il ritardo elastico che c'era prima (lerp/slerp) sembrava più morbido,
+    // ma durante una virata rapida la camera restava indietro rispetto allo
+    // scafo e scivolava DENTRO la fusoliera: ecco perché i pezzi della nave
+    // comparivano solo muovendo il mouse, e da fermo no. Sei avvitato al
+    // sedile: la camera deve stare esattamente dove sta la nave.
+    camPos.copy(CAM.cockpit).applyQuaternion(ship.quat).add(ship.pos);
     R.camera.position.copy(camPos);
-    R.camera.quaternion.slerp(ship.quat, 1 - Math.exp(-CAM.cockRot * dt));
+    R.camera.quaternion.copy(ship.quat);
 
     const wantFov = ship.boosting ? CAM.cockFovBoost : CAM.cockFov;
     R.camera.fov += (wantFov - R.camera.fov) * (1 - Math.exp(-5.5 * dt));
@@ -508,6 +583,6 @@ addEventListener('resize', () => debris.resize());
 requestAnimationFrame(frame);
 
 window.SR = {
-  R, ship, field, enemies, weapons, debris, audio, input, G, THREE, CAM, FLY,
-  startGame, setState, setCombat, pauseGame, resumeGame, abandonMission, toggleFullscreen, toast,
+  R, ship, field, enemies, weapons, debris, audio, input, G, THREE, CAM, FLY, scenery,
+  startGame, setState, setCombat, pauseGame, resumeGame, abandonMission, toggleFullscreen, toast, openSheet, closeSheet,
 };

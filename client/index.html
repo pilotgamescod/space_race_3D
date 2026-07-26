@@ -195,6 +195,98 @@
   }
   #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  /* ══ ingranaggio sempre accessibile ══ */
+  #gear {
+    position: fixed; top: 18px; right: 22px; z-index: 45;
+    width: 34px; height: 34px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--hairline); color: var(--ink-dim);
+    background: rgba(5,7,12,0.5); backdrop-filter: blur(6px);
+    transition: color 0.2s ease, border-color 0.2s ease, transform 0.3s ease;
+  }
+  #gear:hover { color: var(--ink); border-color: var(--accent); background: rgba(5,7,12,0.5); transform: rotate(35deg); }
+  body.cockpit #gear { top: 44px; right: 40px; }
+
+  /* ══ pannelli a scheda ══ */
+  .sheetwrap { background: rgba(3,5,9,0.90); backdrop-filter: blur(3px); }
+  .sheet {
+    width: min(880px, 92vw); max-height: 86vh;
+    display: flex; flex-direction: column;
+    border: 1px solid var(--hairline); background: rgba(8,11,17,0.96);
+  }
+  .stabs { display: flex; border-bottom: 1px solid var(--hairline); }
+  .stab {
+    flex: 1; border: none; border-right: 1px solid var(--hairline);
+    padding: 16px 10px; font-size: 10px; letter-spacing: 0.26em;
+    color: var(--ink-faint); background: none;
+  }
+  .stab:hover { color: var(--ink); background: rgba(111,211,255,0.05); letter-spacing: 0.26em; border-color: var(--hairline); }
+  .stab.on { color: var(--accent); background: rgba(111,211,255,0.07); }
+  .sclose {
+    border: none; border-left: 1px solid var(--hairline);
+    padding: 16px 22px; font-size: 9px; letter-spacing: 0.2em; color: var(--ink-faint);
+  }
+  .sclose:hover { color: var(--warn); border-color: var(--hairline); background: none; letter-spacing: 0.2em; }
+  .sbody { overflow-y: auto; padding: 30px 34px 36px; scrollbar-width: thin; }
+  .sbody h3 {
+    font-size: 9.5px; font-weight: 400; letter-spacing: 0.32em;
+    text-transform: uppercase; color: var(--accent);
+    margin: 30px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--hairline);
+  }
+  .sbody h3:first-child { margin-top: 0; }
+  .lead { font-size: 12px; line-height: 1.85; color: var(--ink-dim); max-width: 62ch; }
+  .sbody .keys { margin-top: 0; grid-template-columns: 108px 1fr; gap: 10px 18px; font-size: 10.5px; }
+  .sbody .keys b { text-align: right; color: var(--accent); }
+  .sbody .keys span { color: var(--ink-dim); line-height: 1.5; }
+  .keys.compact { font-size: 10px; gap: 7px 18px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .two b { font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink); }
+  .two p { font-size: 11.5px; line-height: 1.75; color: var(--ink-dim); margin-top: 8px; }
+  table.score { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  table.score td { padding: 9px 0; border-bottom: 1px solid rgba(232,238,245,0.07); color: var(--ink-dim); }
+  table.score td:last-child { text-align: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+  ul.tips { list-style: none; font-size: 11.5px; line-height: 1.8; color: var(--ink-dim); }
+  ul.tips li { padding-left: 18px; position: relative; margin-bottom: 9px; }
+  ul.tips li::before { content: '—'; position: absolute; left: 0; color: var(--ink-faint); }
+  ul.tips b { color: var(--ink); font-weight: 400; }
+
+  /* ══ catalogo navicelle ══ */
+  .ships { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-top: 18px; }
+  .ship {
+    border: 1px solid var(--hairline); padding: 15px 16px 17px;
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+  .ship:not(.locked) { cursor: pointer; }
+  .ship:not(.locked):hover { border-color: var(--accent); background: rgba(111,211,255,0.05); }
+  .ship.locked { opacity: 0.42; }
+  .ship.sel { border-color: var(--accent); background: rgba(111,211,255,0.08); }
+  .shead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .sname { font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .slock, .sok { font-size: 8px; letter-spacing: 0.2em; text-transform: uppercase; }
+  .slock { color: var(--ink-faint); }
+  .sok { color: var(--accent); }
+  .srole { font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-top: 5px; }
+  .sdesc { font-size: 11px; line-height: 1.7; color: var(--ink-dim); margin: 11px 0 13px; }
+  .sbar { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }
+  .sk { width: 62px; font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+  .st { flex: 1; height: 2px; background: rgba(232,238,245,0.10); position: relative; }
+  .st i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+  .ship.locked .st i { background: var(--ink-faint); }
+
+  /* ══ opzioni ══ */
+  .opts { display: flex; flex-direction: column; gap: 3px; }
+  .opt {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    gap: 4px 16px; padding: 12px 0; border-bottom: 1px solid rgba(232,238,245,0.06);
+  }
+  .opt > span { font-size: 11.5px; color: var(--ink); }
+  .opt em { grid-column: 1 / 2; font-size: 10px; font-style: normal; color: var(--ink-faint); line-height: 1.5; }
+  .tgl {
+    grid-row: 1 / 3; min-width: 108px; padding: 9px 14px;
+    font-size: 9px; letter-spacing: 0.2em; color: var(--ink-dim);
+  }
+  .tgl.on { color: var(--accent); border-color: rgba(111,211,255,0.4); }
+
   #err {
     position: fixed; inset: auto 0 0 0; z-index: 200;
     background: #2a0d0d; color: #ffb4a0; border-top: 1px solid #6d2020;
@@ -218,22 +310,120 @@
   <div class="rule"></div>
   <button id="btn-start">Avvia missione</button>
   <div class="best">record <span id="menu-best">0</span></div>
-  <div class="keys">
-    <b>mouse</b><span>assetto di volo</span>
-    <b>click</b><span>fuoco</span>
-    <b>W / S</b><span>potenza motori</span>
-    <b>Q / E</b><span>rollio</span>
-    <b>maiusc</b><span>postbruciatore</span>
-    <b>V</b><span>vista cabina / esplorazione</span>
-    <b>C</b><span>profondità di campo</span>
-    <b>O</b><span>occlusione ambientale</span>
-    <b>F</b><span>schermo intero</span>
-    <b>M</b><span>audio</span>
-    <b>esc</b><span>pausa</span>
-  </div>
   <div class="ghostrow">
-    <button class="ghost" id="btn-fs">schermo intero</button>
-    <button class="ghost" id="btn-mute">audio attivo</button>
+    <button class="ghost" id="btn-help">Istruzioni</button>
+    <button class="ghost" id="btn-hangar">Navicelle</button>
+    <button class="ghost" id="btn-settings">Impostazioni</button>
+  </div>
+</div>
+
+<!-- ══ PANNELLI (istruzioni / navicelle / impostazioni) ══ -->
+<div class="layer sheetwrap" id="sheet">
+  <div class="sheet">
+    <div class="stabs">
+      <button class="stab" data-tab="help">Istruzioni</button>
+      <button class="stab" data-tab="hangar">Navicelle</button>
+      <button class="stab" data-tab="settings">Impostazioni</button>
+      <button class="sclose" id="sheet-close" title="Chiudi">esc</button>
+    </div>
+
+    <div class="sbody">
+      <!-- ISTRUZIONI -->
+      <section data-panel="help">
+        <p class="lead">Sei solo in un campo di asteroidi pattugliato da
+        sentinelle. Non si vince: si resiste, e si accumulano punti finché
+        lo scafo regge.</p>
+
+        <h3>Comandi</h3>
+        <div class="keys">
+          <b>mouse</b><span>assetto di volo — la nave punta dove porti il mirino</span>
+          <b>click</b><span>fuoco</span>
+          <b>W / S</b><span>aumenta e riduce la potenza dei motori</span>
+          <b>Q / E</b><span>rollio a sinistra e a destra</span>
+          <b>maiusc</b><span>postbruciatore (consuma la riserva di spinta)</span>
+          <b>V</b><span>alterna vista esterna e vista dalla cabina</span>
+          <b>esc</b><span>pausa</span>
+          <b>F</b><span>schermo intero</span>
+          <b>M</b><span>audio</span>
+          <b>C</b><span>profondità di campo</span>
+          <b>O</b><span>occlusione ambientale</span>
+        </div>
+
+        <h3>Le due viste</h3>
+        <div class="two">
+          <div>
+            <b>Esplorazione</b>
+            <p>Telecamera esterna, campo visivo ampio. Vedi arrivare le cose
+            da lontano, ma la nave risponde più morbida.</p>
+          </div>
+          <div>
+            <b>Combattimento</b>
+            <p>Dalla cabina. Vedi meno, ma imbardata e beccheggio quasi
+            raddoppiano e la mira resta ferma: è la vista per battersi.</p>
+          </div>
+        </div>
+
+        <h3>Punteggio</h3>
+        <table class="score">
+          <tr><td>Ogni secondo in volo</td><td>4 pt</td></tr>
+          <tr><td>Roccia polverizzata</td><td>8 pt + la sua stazza</td></tr>
+          <tr><td>Sentinella abbattuta</td><td>150 pt</td></tr>
+        </table>
+
+        <h3>Da sapere</h3>
+        <ul class="tips">
+          <li>I massi grandi reggono tre colpi e si spezzano in frammenti,
+              che restano pericolosi.</li>
+          <li>Le sentinelle hanno un <b>occhio che si accende di bianco</b>
+              un attimo prima di sparare: è il momento di scartare.</li>
+          <li>Le rocce distrutte non tornano, nemmeno tornando indietro.</li>
+          <li>Urtare fa più danno più il masso è grosso: fino a 38 sullo scafo.</li>
+        </ul>
+      </section>
+
+      <!-- NAVICELLE -->
+      <section data-panel="hangar" hidden>
+        <p class="lead">Una sola è pilotabile. Le altre sono progetti in
+        cantiere: caratteristiche già definite, scafo ancora da costruire.</p>
+        <div class="ships" id="ship-list"></div>
+      </section>
+
+      <!-- IMPOSTAZIONI -->
+      <section data-panel="settings" hidden>
+        <h3>Grafica</h3>
+        <div class="opts">
+          <div class="opt"><span>Occlusione ambientale</span>
+            <button class="tgl" id="opt-ao">attiva</button>
+            <em>ombreggia incavi e contatti. Costa ~1.3 ms per fotogramma.</em></div>
+          <div class="opt"><span>Profondità di campo</span>
+            <button class="tgl" id="opt-dof">spenta</button>
+            <em>sfoca lo sfondo. Raddoppia il passaggio di profondità.</em></div>
+          <div class="opt"><span>Schermo intero</span>
+            <button class="tgl" id="opt-fs">attiva</button>
+            <em>nasconde la barra degli indirizzi del browser.</em></div>
+        </div>
+
+        <h3>Audio</h3>
+        <div class="opts">
+          <div class="opt"><span>Suono</span>
+            <button class="tgl" id="opt-audio">attivo</button>
+            <em>motore, colpi ed esplosioni sono sintetizzati dal vivo.</em></div>
+        </div>
+
+        <h3>Comandi rapidi</h3>
+        <div class="keys compact">
+          <b>mouse</b><span>assetto</span>
+          <b>click</b><span>fuoco</span>
+          <b>W / S</b><span>potenza</span>
+          <b>Q / E</b><span>rollio</span>
+          <b>maiusc</b><span>postbruciatore</span>
+          <b>V</b><span>cambia vista</span>
+          <b>esc</b><span>pausa</span>
+        </div>
+        <p class="lead" style="margin-top:22px;">Per la spiegazione completa
+        apri <b>Istruzioni</b>.</p>
+      </section>
+    </div>
   </div>
 </div>
 
@@ -262,6 +452,7 @@
   <div class="btncol">
     <button id="btn-resume">Riprendi</button>
     <button class="ghost" id="btn-view">Cambia vista &nbsp;·&nbsp; V</button>
+    <button class="ghost" id="btn-pause-help">Istruzioni e impostazioni</button>
     <button class="ghost danger" id="btn-abandon">Abbandona missione</button>
   </div>
   <div class="warnline">abbandonare distrugge la navicella</div>
@@ -321,6 +512,14 @@
     <div class="u">unità / sec</div>
   </div>
 </div>
+
+<button id="gear" title="Impostazioni">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+</button>
 
 <div id="warn">scafo critico</div>
 <div id="flash"></div>
