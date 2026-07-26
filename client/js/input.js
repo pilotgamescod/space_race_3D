@@ -15,7 +15,7 @@ export class Input {
     this.my = innerHeight / 2;
     // scostamento normalizzato -1..1, con zona morta al centro
     this.aim = { x: 0, y: 0 };
-    this.deadzone = 0.06;
+    this.deadzone = 0.045;
     this.onKey = null;   // callback per i tasti singoli (es. C)
 
     addEventListener('mousemove', e => { this.mx = e.clientX; this.my = e.clientY; });
@@ -56,9 +56,11 @@ export class Input {
     const apply = (v) => {
       const s = Math.sign(v), a = Math.abs(v);
       if (a < this.deadzone) return 0;
-      // curva quadratica: preciso al centro, reattivo ai bordi
+      // Curva a esponente 1.55 invece di 2: al quadrato i movimenti piccoli
+      // sparivano quasi del tutto e la nave sembrava non rispondere. Così
+      // resta precisa al centro ma si muove davvero.
       const n = Math.min(1, (a - this.deadzone) / (1 - this.deadzone));
-      return s * n * n;
+      return s * Math.pow(n, 1.55);
     };
     this.aim.x = apply(ax);
     this.aim.y = apply(ay);

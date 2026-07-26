@@ -10,12 +10,13 @@ import { panelSet, glowTexture } from './textures.js';
 
 export const SENT = {
   hp:          4,
-  speed:       58,
-  orbitDist:   72,     // distanza a cui si stabilizzano
+  speed:       34,   // accelerazione: la velocità limite risulta ~85 u/s,
+                     // sotto la velocità di crociera del giocatore (~119)
+  orbitDist:   95,     // distanza a cui si stabilizzano
   aggroDist:   620,    // oltre questa non ti vedono
-  fireEvery:   1.9,
-  telegraph:   0.45,   // preavviso prima del colpo
-  turnRate:    2.2,
+  fireEvery:   2.4,
+  telegraph:   0.62,   // preavviso prima del colpo
+  turnRate:    1.7,
   damage:      12,
   radius:      4.2,   // scafo dell'intercettore, non più un nucleo sferico
   scoreValue:  150,
@@ -250,7 +251,7 @@ export class Enemies {
         // deriva laterale: senza questa restano immobili davanti a te
         // e sembrano bersagli da tiro al piattello
         const side = new THREE.Vector3().crossVectors(toP, new THREE.Vector3(0, 1, 0)).normalize();
-        e.vel.addScaledVector(side, Math.sin(performance.now() / 900 + e.spin[0] * 4) * SENT.speed * dt * 1.1);
+        e.vel.addScaledVector(side, Math.sin(performance.now() / 1400 + e.spin[0] * 4) * SENT.speed * dt * 0.7);
 
         // punta il giocatore
         this._m.lookAt(e.pos, playerPos, new THREE.Vector3(0, 1, 0));

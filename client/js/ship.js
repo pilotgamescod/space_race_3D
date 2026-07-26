@@ -10,11 +10,11 @@ export const FLY = {
   thrustMax:   62,    // accelerazione a potenza piena
   thrustBoost: 168,   // accelerazione con postbruciatore
   drag:        0.52,  // attrito: tiene il controllo arcade, non è realistico
-  yawRate:     1.15,  // rad/s a cursore tutto a lato
-  pitchRate:   1.00,
-  rollRate:    2.10,
+  yawRate:     1.50,  // rad/s a cursore tutto a lato
+  pitchRate:   1.34,
+  rollRate:    2.50,
   bankFactor:  0.85,  // inclinazione automatica in virata (virata coordinata)
-  turnSmooth:  6.2,   // quanto morbidamente inseguono i comandi
+  turnSmooth:  8.0,   // quanto morbidamente inseguono i comandi
   afterMax:    100,   // capacità del postbruciatore
   afterBurn:   34,    // consumo al secondo
   afterRegen:  17,    // ricarica al secondo
@@ -35,10 +35,10 @@ export const FLY = {
 export const COCKPIT_EYE = new THREE.Vector3(0, 0.66, -2.25);
 
 export const COMBAT = {
-  yaw:    1.85,   // moltiplicatori sulle velocità angolari
-  pitch:  1.85,
+  yaw:    2.05,   // moltiplicatori sulle velocità angolari
+  pitch:  2.05,
   roll:   1.45,
-  smooth: 1.55,   // insegue i comandi più svelto
+  smooth: 1.70,   // insegue i comandi più svelto
   bank:   0.35,   // meno inclinazione automatica: la mira resta stabile
 };
 

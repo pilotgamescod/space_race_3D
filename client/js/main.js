@@ -16,6 +16,7 @@ import { Enemies, SENT } from './enemies.js';
 import { Audio } from './audio.js';
 import { Scenery } from './scenery.js';
 import { renderHangar } from './hangar.js';
+import { Radar, leadPoint } from './radar.js';
 
 const $ = (id) => document.getElementById(id);
 const bootBar = $('boot-bar'), bootMsg = $('boot-msg');
@@ -43,6 +44,10 @@ step(80, 'armamento e ostili');
 const weapons = new Weapons(R.scene);
 const enemies = new Enemies(R.scene, debris, audio);
 
+step(88, 'radar tattico');
+const radar = new Radar($('radar'));
+addEventListener('resize', () => radar.resize());
+
 step(92, 'comandi');
 const input = new Input();
 
@@ -58,6 +63,8 @@ const G = {
   spawnTimer: 6,
   best: +(localStorage.getItem('sr3d_best') || 0),
   shipId: localStorage.getItem('sr3d_ship') || 'lancer',
+  target: null,
+  allies: [],      // popolato dal multigiocatore, quando ci sarà
   dofOn: false,
   muted: localStorage.getItem('sr3d_mute') === '1',
 };
@@ -75,6 +82,8 @@ const ui = {
   menuBest: $('menu-best'),
   ovScore: $('ov-score'), ovKills: $('ov-kills'), ovRocks: $('ov-rocks'), ovTime: $('ov-time'), ovBest: $('ov-best'),
   flash: $('flash'), warn: $('warn'),
+  rContacts: $('r-contacts'), rPos: $('r-pos'),
+  lead: $('lead'), tbox: $('tbox'),
 };
 
 function setState(s) {
@@ -84,6 +93,7 @@ function setState(s) {
   ui.over.classList.toggle('on',  s === 'dead');
   ui.pause.classList.toggle('on', s === 'paused');
   ui.reticle.style.opacity = s === 'playing' ? '1' : '0';
+  if (s !== 'playing') { ui.lead.classList.remove('on'); ui.tbox.classList.remove('on'); }
   document.body.style.cursor = s === 'playing' ? 'none' : 'default';
   if (s !== 'playing') audio.engine(0, false);
 }
@@ -482,6 +492,7 @@ function updatePlaying(dt) {
   audio.engine(ship.throttle, ship.boosting);
 
   updateCamera(dt);
+  updateTargeting();
 }
 
 // ─── telecamera: due modalità ───────────────────────────────────────
@@ -537,6 +548,57 @@ function setCombat(on) {
   toast(on ? 'combattimento — manovrabilità piena  ·  V' : 'esplorazione — vista ampia  ·  V');
 }
 
+// ─── aggancio del bersaglio e mira anticipata ───────────────────────
+// Contro un bersaglio che si sposta di lato, sparando dove lo VEDI non lo
+// prendi mai: il proiettile impiega un tempo ad arrivare. Il cerchietto
+// giallo indica dove sparare davvero.
+const _sv = new THREE.Vector3();
+const _tp = new THREE.Vector3();
+function updateTargeting() {
+  let best = null, bestDot = 0.55;      // solo dentro un cono frontale
+  const fwd = ship.forward;
+  for (const e of enemies.list) {
+    _sv.copy(e.pos).sub(ship.pos);
+    const d = _sv.length();
+    if (d > 900) continue;
+    _sv.divideScalar(d);
+    const dot = _sv.dot(fwd);
+    if (dot > bestDot) { bestDot = dot; best = e; }
+  }
+
+  if (!best) {
+    ui.lead.classList.remove('on');
+    ui.tbox.classList.remove('on');
+    G.target = null;
+    return;
+  }
+  G.target = best;
+
+  // riquadro sul bersaglio
+  _tp.copy(best.pos).project(R.camera);
+  if (_tp.z < 1) {
+    const x = (_tp.x * 0.5 + 0.5) * innerWidth;
+    const y = (-_tp.y * 0.5 + 0.5) * innerHeight;
+    ui.tbox.style.transform = `translate(${x - 32}px, ${y - 32}px)`;
+    ui.tbox.classList.add('on');
+  } else ui.tbox.classList.remove('on');
+
+  // punto di mira anticipato
+  const lp = leadPoint(ship.pos, ship.vel, best.pos, best.vel,
+                       GUN.speed + ship.speed);
+  if (lp) {
+    _tp.copy(lp).project(R.camera);
+    if (_tp.z < 1) {
+      const x = (_tp.x * 0.5 + 0.5) * innerWidth;
+      const y = (-_tp.y * 0.5 + 0.5) * innerHeight;
+      ui.lead.style.transform = `translate(${x - 20}px, ${y - 20}px)`;
+      ui.lead.classList.add('on');
+      return;
+    }
+  }
+  ui.lead.classList.remove('on');
+}
+
 function hurt(amount, heavy) {
   if (ship.invuln > 0) return;
   const dead = ship.damage(amount);
@@ -567,6 +629,20 @@ function updateHud(dt) {
     ui.warn.classList.toggle('on', ship.hull <= 30);
   }
 
+  if (G.state === 'playing' || G.state === 'paused') {
+    // allies: vuoto per ora, ma la firma è già quella del multigiocatore
+    radar.draw(ship, enemies.list, field.rocks, G.allies);
+    ui.rContacts.textContent = radar.contacts;
+    ui.rContacts.classList.toggle('zero', radar.contacts === 0);
+    // Coordinate di settore: servono già ora per orientarsi, e serviranno
+    // per darsi appuntamento con gli amici nel multigiocatore.
+    const S = 340;
+    ui.rPos.textContent = 'settore ' +
+      Math.floor(ship.pos.x / S) + ' · ' +
+      Math.floor(ship.pos.y / S) + ' · ' +
+      Math.floor(ship.pos.z / S);
+  }
+
   fpsAcc += dt; fpsN++;
   if (fpsAcc >= 0.5) {
     ui.fps.textContent   = Math.round(fpsN / fpsAcc);
@@ -583,6 +659,6 @@ addEventListener('resize', () => debris.resize());
 requestAnimationFrame(frame);
 
 window.SR = {
-  R, ship, field, enemies, weapons, debris, audio, input, G, THREE, CAM, FLY, scenery,
+  R, ship, field, enemies, weapons, debris, audio, input, G, THREE, CAM, FLY, scenery, radar,
   startGame, setState, setCombat, pauseGame, resumeGame, abandonMission, toggleFullscreen, toast, openSheet, closeSheet,
 };
