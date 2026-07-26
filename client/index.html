@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPACE RACE</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink:       #e8eef5;
+    --ink-dim:   rgba(232,238,245,0.45);
+    --ink-faint: rgba(232,238,245,0.20);
+    --accent:    #6fd3ff;
+    --warn:      #ff7a4d;
+    --hairline:  rgba(232,238,245,0.14);
+  }
+
+  html, body { height: 100%; overflow: hidden; background: #05070c; }
+  body {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--ink);
+    user-select: none;
+  }
+  canvas { display: block; position: fixed; inset: 0; }
+
+  /* ══ caricamento ══ */
+  #boot {
+    position: fixed; inset: 0; z-index: 100; background: #05070c;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; transition: opacity 0.8s ease;
+  }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot .t { font-size: 11px; letter-spacing: 0.42em; color: var(--ink-dim); text-transform: uppercase; }
+  #boot .bar { width: 190px; height: 1px; background: var(--hairline); overflow: hidden; }
+  #boot .bar i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.3s ease; }
+  #boot .m { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-faint); min-height: 14px; }
+
+  /* ══ pannelli a comparsa ══ */
+  .layer {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.55s ease;
+    background: radial-gradient(ellipse at center, rgba(5,7,12,0.35) 0%, rgba(5,7,12,0.86) 100%);
+  }
+  .layer.on { opacity: 1; pointer-events: auto; }
+
+  /* Il menu va a sinistra e la navicella resta libera a destra: centrati,
+     testo e nave si sovrapponevano e non si leggeva niente. */
+  #menu {
+    align-items: flex-start;
+    padding-left: 7vw;
+    background:
+      linear-gradient(100deg, rgba(5,7,12,0.94) 0%, rgba(5,7,12,0.80) 34%, rgba(5,7,12,0.10) 62%, rgba(5,7,12,0) 100%),
+      radial-gradient(ellipse at 70% 50%, rgba(5,7,12,0) 30%, rgba(5,7,12,0.55) 100%);
+  }
+  #menu .keys { justify-items: start; }
+  #menu .rule { margin: 30px 0; }
+
+  h1 {
+    font-size: clamp(38px, 7.5vw, 82px);
+    font-weight: 300; letter-spacing: 0.30em;
+    text-transform: uppercase; line-height: 1;
+    margin-left: 0.30em;   /* compensa il tracking sull'ultima lettera */
+  }
+  .tagline {
+    font-size: 10px; letter-spacing: 0.44em; color: var(--ink-faint);
+    text-transform: uppercase; margin-top: 18px;
+  }
+  .rule { width: 210px; height: 1px; background: var(--hairline); margin: 34px 0; }
+
+  button {
+    font-family: inherit; cursor: pointer;
+    background: none; border: 1px solid var(--hairline);
+    color: var(--ink); font-size: 11px;
+    letter-spacing: 0.30em; text-transform: uppercase;
+    padding: 15px 44px;
+    transition: border-color 0.22s ease, background 0.22s ease, letter-spacing 0.22s ease;
+  }
+  button:hover { border-color: var(--accent); background: rgba(111,211,255,0.07); letter-spacing: 0.34em; }
+  button.ghost { border-color: transparent; color: var(--ink-dim); font-size: 10px; padding: 11px 20px; }
+  button.ghost:hover { border-color: transparent; color: var(--ink); background: none; }
+
+  .keys {
+    margin-top: 40px; display: grid;
+    grid-template-columns: auto auto; gap: 9px 20px;
+    font-size: 9.5px; letter-spacing: 0.14em; color: var(--ink-faint);
+  }
+  .keys b { color: var(--ink-dim); font-weight: 400; text-align: right; }
+
+  .best { margin-top: 26px; font-size: 10px; letter-spacing: 0.26em; color: var(--ink-faint); }
+  .best span { color: var(--accent); }
+
+  /* ══ fine partita ══ */
+  #over h2 {
+    font-size: clamp(26px, 4.5vw, 44px); font-weight: 300;
+    letter-spacing: 0.26em; text-transform: uppercase; color: var(--warn);
+    margin-left: 0.26em;
+  }
+  .stats {
+    display: grid; grid-template-columns: auto auto; gap: 11px 30px;
+    margin: 34px 0 8px; font-size: 11px; letter-spacing: 0.16em;
+  }
+  .stats .k { color: var(--ink-faint); text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.22em; }
+  .stats .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats .v.big { font-size: 22px; color: var(--accent); }
+  .btnrow { display: flex; gap: 12px; margin-top: 32px; align-items: center; }
+
+  /* ══ HUD ══ */
+  #hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: 0; transition: opacity 0.8s ease; }
+  #hud.on { opacity: 1; }
+  .pane { position: fixed; font-size: 10px; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+
+  #st { bottom: 26px; left: 28px; display: flex; flex-direction: column; gap: 9px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row .lbl { width: 54px; }
+  .row .track { width: 132px; height: 3px; background: rgba(232,238,245,0.10); position: relative; overflow: hidden; }
+  .row .track i { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--ink); transition: width 0.09s linear; }
+  .row .track i.acc { background: var(--accent); }
+  .row .track i.hot { background: var(--warn); }
+  .row .num { width: 46px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: 0.06em; }
+
+  #spd { bottom: 22px; right: 30px; text-align: right; }
+  #spd .v { font-size: 34px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1; }
+  #spd .u { font-size: 9px; letter-spacing: 0.3em; color: var(--ink-faint); margin-top: 4px; }
+
+  #sc { top: 24px; left: 28px; }
+  #sc .v { font-size: 30px; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; line-height: 1; color: var(--ink); }
+  #sc .u { font-size: 9px; letter-spacing: 0.3em; color: var(--ink-faint); margin-top: 5px; }
+  #sc .k { margin-top: 12px; font-size: 9.5px; letter-spacing: 0.22em; color: var(--ink-faint); }
+  #sc .k b { color: var(--ink-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+
+  #diag { top: 24px; right: 30px; text-align: right; line-height: 1.9; font-size: 9.5px; color: var(--ink-faint); }
+  #diag .k { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+  #warn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -170px);
+    font-size: 10px; letter-spacing: 0.4em; color: var(--warn);
+    text-transform: uppercase; opacity: 0; transition: opacity 0.25s ease;
+    z-index: 22; pointer-events: none;
+  }
+  #warn.on { opacity: 1; animation: pulse 1.05s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.28; } 50% { opacity: 1; } }
+
+  #reticle { position: fixed; z-index: 21; pointer-events: none; opacity: 0; transition: opacity 0.4s ease; will-change: transform; }
+
+  #flash {
+    position: fixed; inset: 0; z-index: 30; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(255,40,20,0) 35%, rgba(255,40,20,0.9) 100%);
+    opacity: 0; transition: opacity 0.28s ease;
+  }
+
+  .ghostrow { display: flex; gap: 6px; margin-top: 24px; margin-left: -20px; }
+
+  /* ══ pausa ══ */
+  .pausetitle {
+    font-size: clamp(20px, 3.4vw, 32px); font-weight: 300;
+    letter-spacing: 0.28em; text-transform: uppercase; margin-left: 0.28em;
+  }
+  .btncol { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .btncol button { min-width: 300px; }
+  button.danger { color: var(--warn); }
+  button.danger:hover { border-color: var(--warn); background: rgba(255,122,77,0.09); color: var(--warn); }
+  .warnline {
+    margin-top: 20px; font-size: 9px; letter-spacing: 0.26em;
+    color: var(--ink-faint); text-transform: uppercase;
+  }
+
+  /* ══ telaio della cabina ══
+     Compare solo in combattimento. È quello che vende la sensazione di
+     stare DENTRO la navicella: senza una cornice, una vista in prima
+     persona sembra solo una telecamera avvicinata. */
+  #cockpit {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 18; pointer-events: none;
+    opacity: 0; transition: opacity 0.45s ease;
+  }
+  body.cockpit #cockpit { opacity: 1; }
+  /* in cabina l'HUD si stringe verso il centro, sopra la plancia */
+  body.cockpit #st   { bottom: 96px; left: 210px; }
+  body.cockpit #spd  { bottom: 92px; right: 212px; }
+  body.cockpit #sc   { top: 52px; left: 190px; }
+  body.cockpit #diag { top: 52px; right: 196px; }
+
+  /* Avviso a schermo: un'impostazione cambiata da tastiera senza riscontro
+     visibile sembra un guasto del gioco. */
+  #toast {
+    position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%) translateY(8px);
+    z-index: 60; pointer-events: none;
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink); background: rgba(5,7,12,0.86);
+    border: 1px solid var(--hairline); padding: 10px 20px;
+    opacity: 0; transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  #err {
+    position: fixed; inset: auto 0 0 0; z-index: 200;
+    background: #2a0d0d; color: #ffb4a0; border-top: 1px solid #6d2020;
+    font-size: 11px; padding: 10px 16px; line-height: 1.6;
+    display: none; white-space: pre-wrap; max-height: 45vh; overflow: auto;
+  }
+</style>
+</head>
+<body>
+
+<div id="boot">
+  <div class="t">Space Race</div>
+  <div class="bar"><i id="boot-bar"></i></div>
+  <div class="m" id="boot-msg">avvio</div>
+</div>
+
+<!-- ══ MENU PRINCIPALE ══ -->
+<div class="layer" id="menu">
+  <h1>Space Race</h1>
+  <div class="tagline">sopravvivi al cosmo</div>
+  <div class="rule"></div>
+  <button id="btn-start">Avvia missione</button>
+  <div class="best">record <span id="menu-best">0</span></div>
+  <div class="keys">
+    <b>mouse</b><span>assetto di volo</span>
+    <b>click</b><span>fuoco</span>
+    <b>W / S</b><span>potenza motori</span>
+    <b>Q / E</b><span>rollio</span>
+    <b>maiusc</b><span>postbruciatore</span>
+    <b>V</b><span>vista cabina / esplorazione</span>
+    <b>C</b><span>profondità di campo</span>
+    <b>F</b><span>schermo intero</span>
+    <b>M</b><span>audio</span>
+    <b>esc</b><span>pausa</span>
+  </div>
+  <div class="ghostrow">
+    <button class="ghost" id="btn-fs">schermo intero</button>
+    <button class="ghost" id="btn-mute">audio attivo</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- ══ FINE PARTITA ══ -->
+<div class="layer" id="over">
+  <h2>Scafo distrutto</h2>
+  <div class="stats">
+    <span class="k">punteggio</span><span class="v big" id="ov-score">0</span>
+    <span class="k">ostili abbattuti</span><span class="v" id="ov-kills">0</span>
+    <span class="k">rocce polverizzate</span><span class="v" id="ov-rocks">0</span>
+    <span class="k">tempo in volo</span><span class="v" id="ov-time">0:00</span>
+    <span class="k">record</span><span class="v" id="ov-best">0</span>
+  </div>
+  <div class="btnrow">
+    <button id="btn-retry">Riprova</button>
+    <button class="ghost" id="btn-menu">Menu</button>
+  </div>
+</div>
+
+<!-- ══ PAUSA ══ -->
+<div class="layer" id="pause">
+  <h2 class="pausetitle">Missione in pausa</h2>
+  <div class="rule"></div>
+  <div class="btncol">
+    <button id="btn-resume">Riprendi</button>
+    <button class="ghost" id="btn-view">Cambia vista &nbsp;·&nbsp; V</button>
+    <button class="ghost danger" id="btn-abandon">Abbandona missione</button>
+  </div>
+  <div class="warnline">abbandonare distrugge la navicella</div>
+</div>
+
+<!-- ══ TELAIO DELLA CABINA — solo in combattimento ══ -->
+<svg id="cockpit" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
+  <!-- montanti del tettuccio -->
+  <path d="M0 0 L120 0 L232 600 L150 600 Z" fill="rgba(10,13,18,0.92)"/>
+  <path d="M1000 0 L880 0 L768 600 L850 600 Z" fill="rgba(10,13,18,0.92)"/>
+  <!-- cornice superiore -->
+  <path d="M120 0 L880 0 L862 34 Q500 8 138 34 Z" fill="rgba(10,13,18,0.9)"/>
+  <!-- plancia inferiore -->
+  <path d="M150 600 L850 600 L836 528 Q500 494 164 528 Z" fill="rgba(10,13,18,0.94)"/>
+  <!-- bordi illuminati dei montanti -->
+  <path d="M232 600 L120 0" stroke="rgba(111,211,255,0.22)" stroke-width="1.5" fill="none"/>
+  <path d="M768 600 L880 0" stroke="rgba(111,211,255,0.22)" stroke-width="1.5" fill="none"/>
+  <path d="M164 528 Q500 494 836 528" stroke="rgba(111,211,255,0.28)" stroke-width="1.5" fill="none"/>
+  <!-- spie sulla plancia -->
+  <g fill="rgba(111,211,255,0.5)">
+    <rect x="250" y="556" width="26" height="3"/><rect x="286" y="556" width="26" height="3"/>
+    <rect x="322" y="556" width="26" height="3"/>
+    <rect x="652" y="556" width="26" height="3"/><rect x="688" y="556" width="26" height="3"/>
+    <rect x="724" y="556" width="26" height="3"/>
+  </g>
+  <!-- riferimento d'assetto sul vetro -->
+  <g stroke="rgba(111,211,255,0.20)" stroke-width="1.2" fill="none">
+    <path d="M330 300 L430 300 M570 300 L670 300"/>
+    <path d="M500 214 L500 250 M500 350 L500 386"/>
+  </g>
+</svg>
+
+<!-- ══ HUD ══ -->
+<div id="hud">
+  <div class="pane" id="sc">
+    <div class="v" id="n-score">0</div>
+    <div class="u">punti</div>
+    <div class="k">abbattuti <b id="n-kills">0</b></div>
+  </div>
+
+  <div class="pane" id="diag">
+    <div>fps <span class="k" id="d-fps">—</span></div>
+    <div>rocce <span class="k" id="d-rocks">—</span></div>
+    <div>ostili <span class="k" id="d-foes">—</span></div>
+    <div>particelle <span class="k" id="d-parts">—</span></div>
+    <div>disegni <span class="k" id="d-calls">—</span></div>
+  </div>
+
+  <div class="pane" id="st">
+    <div class="row"><span class="lbl">potenza</span><span class="track"><i class="acc" id="b-thr"></i></span><span class="num" id="n-thr">0%</span></div>
+    <div class="row"><span class="lbl">scafo</span><span class="track"><i id="b-hp"></i></span><span class="num" id="n-hp">100%</span></div>
+    <div class="row"><span class="lbl">spinta</span><span class="track"><i class="hot" id="b-ab"></i></span><span class="num" id="n-ab">100%</span></div>
+  </div>
+
+  <div class="pane" id="spd">
+    <div class="v" id="n-spd">0</div>
+    <div class="u">unità / sec</div>
+  </div>
+</div>
+
+<div id="warn">scafo critico</div>
+<div id="flash"></div>
+
+<svg id="reticle" width="72" height="72" viewBox="0 0 72 72" fill="none">
+  <circle cx="36" cy="36" r="15" stroke="rgba(111,211,255,0.30)" stroke-width="1"/>
+  <circle cx="36" cy="36" r="1.6" fill="rgba(111,211,255,0.85)"/>
+  <path d="M36 12v8M36 52v8M12 36h8M52 36h8" stroke="rgba(111,211,255,0.55)" stroke-width="1"/>
+</svg>
+
+<div id="err"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+<script type="module">
+  // Un import sbagliato darebbe solo una pagina nera senza spiegazioni:
+  // qualunque errore finisce a schermo.
+  const box = document.getElementById('err');
+  const show = (m) => { box.style.display = 'block'; box.textContent += m + '\n'; };
+  window.addEventListener('error', e => show('ERRORE: ' + (e.message || e.error) + (e.filename ? '\n  in ' + e.filename + ':' + e.lineno : '')));
+  window.addEventListener('unhandledrejection', e => show('PROMESSA RIFIUTATA: ' + (e.reason && e.reason.message || e.reason)));
+  import('./js/main.js').catch(e => show('Caricamento di main.js fallito:\n' + (e && e.stack || e)));
+</script>
+</body>
+</html>
