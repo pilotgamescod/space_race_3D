@@ -32,7 +32,94 @@ export class Audio {
 
     this._noiseBuf = this._makeNoise(2.0);
     this._startEngine();
+    this._startMusic();
     this.ready = true;
+  }
+
+  // ─── musica: pad ambientale generativo ──────────────────────────
+  // Nessun file, nessuna licenza: accordi lenti di oscillatori scordati
+  // che passano per un filtro respirante, più note rade e lunghe in alto.
+  // È la differenza fra "demo tecnica muta" e "gioco con un'atmosfera".
+  _startMusic() {
+    const ctx = this.ctx, t = ctx.currentTime;
+
+    this.mus = { gain: ctx.createGain(), voices: [], chord: 0 };
+    this.mus.gain.gain.setValueAtTime(0, t);
+    this.mus.gain.gain.linearRampToValueAtTime(0.16, t + 6);   // fade-in lungo
+    this.mus.gain.connect(this.master);
+
+    // filtro comune che "respira" con un LFO lentissimo
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = 520; filt.Q.value = 0.8;
+    filt.connect(this.mus.gain);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.045;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 240;
+    lfo.connect(lfoG); lfoG.connect(filt.frequency);
+    lfo.start(t);
+
+    // progressione modale in La minore: quiete, mai risolta del tutto
+    this.mus.chords = [
+      [55.00, 110.00, 164.81, 261.63, 329.63],   // Am(add9)
+      [43.65, 87.31, 130.81, 261.63, 349.23],    // F(add9)
+      [49.00, 98.00, 146.83, 246.94, 293.66],    // G(sus)
+      [41.20, 82.41, 123.47, 246.94, 329.63],    // Em/E → torna ad Am
+    ];
+
+    for (let v = 0; v < 5; v++) {
+      const g = ctx.createGain();
+      g.gain.value = v === 0 ? 0.11 : 0.075;     // il basso appena più su
+      const pair = [];
+      for (const det of [-4, 4]) {               // due oscillatori scordati
+        const o = ctx.createOscillator();
+        o.type = v < 2 ? 'sawtooth' : 'triangle';
+        o.frequency.value = this.mus.chords[0][v];
+        o.detune.value = det;
+        o.connect(g);
+        o.start(t);
+        pair.push(o);
+      }
+      g.connect(filt);
+      this.mus.voices.push(pair);
+    }
+
+    // eco lunga per le note alte: dà lo "spazio" senza convolutore
+    const dly = ctx.createDelay(2); dly.delayTime.value = 0.62;
+    const fb = ctx.createGain(); fb.gain.value = 0.44;
+    const dg = ctx.createGain(); dg.gain.value = 0.5;
+    dly.connect(fb); fb.connect(dly); dly.connect(dg); dg.connect(this.mus.gain);
+    this.mus.delay = dly;
+
+    // cambio d'accordo e note rade, in un ciclo che si autoalimenta
+    const step = () => {
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      this.mus.chord = (this.mus.chord + 1) % this.mus.chords.length;
+      const ch = this.mus.chords[this.mus.chord];
+      // glissando lento: gli accordi si fondono uno nell'altro
+      this.mus.voices.forEach((pair, v) =>
+        pair.forEach(o => o.frequency.setTargetAtTime(ch[v], now, 2.6)));
+      this._musTimer = setTimeout(step, 12000 + Math.random() * 6000);
+    };
+    this._musTimer = setTimeout(step, 12000);
+
+    const sparkle = () => {
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const ch = this.mus.chords[this.mus.chord];
+      // un armonico alto di una voce dell'accordo: sempre consonante
+      const f = ch[2 + Math.floor(Math.random() * 3)] * (Math.random() < 0.5 ? 2 : 4);
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.045, now + 0.4);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 3.4);
+      o.connect(g); g.connect(this.mus.delay); g.connect(this.mus.gain);
+      o.start(now); o.stop(now + 3.6);
+      this._sparkTimer = setTimeout(sparkle, 3500 + Math.random() * 6500);
+    };
+    this._sparkTimer = setTimeout(sparkle, 2500);
   }
 
   _makeNoise(sec) {

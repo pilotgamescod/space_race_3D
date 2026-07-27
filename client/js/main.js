@@ -7,7 +7,8 @@
 // ════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
 import { Renderer, FOV_BASE, FOV_BOOST } from './render.js';
-import { Ship, FLY, COCKPIT_EYE } from './ship.js';
+import { Ship, FLY } from './ship.js';
+import { loadShipModels } from './models.js';
 import { Field } from './field.js';
 import { Input } from './input.js';
 import { Debris } from './debris.js';
@@ -15,6 +16,8 @@ import { Weapons, GUN } from './weapons.js';
 import { Enemies, SENT } from './enemies.js';
 import { Audio } from './audio.js';
 import { Scenery } from './scenery.js';
+import { Planets, WARN_ALTITUDE } from './planets.js';
+import { Dust } from './dust.js';
 import { renderHangar } from './hangar.js';
 import { Radar, leadPoint } from './radar.js';
 
@@ -25,8 +28,15 @@ const step = (p, m) => { if (bootBar) bootBar.style.width = p + '%'; if (bootMsg
 step(12, 'contesto WebGL');
 const R = new Renderer();
 
+step(24, 'modelli delle navicelle');
+// GLB della Valkyrie e del Raider (vedi CREDITS.md). Se qualcosa va male
+// si ottiene null e si ripiega sugli scafi procedurali: mai schermo nero.
+let MODELS = { valkyrie: null, raider: null };
+try { MODELS = await loadShipModels(); }
+catch (e) { console.warn('modelli non disponibili, scafi procedurali', e); }
+
 step(32, 'navicella');
-const ship = new Ship();
+const ship = new Ship(MODELS.valkyrie);
 R.scene.add(ship.group);
 
 step(48, 'sistema particellare');
@@ -39,10 +49,13 @@ field.update(ship.pos, 0);
 
 step(72, 'scenario del cosmo');
 const scenery = new Scenery(R.scene, R.skyGroup);
+const planets = new Planets(R.scene, R.starDir);
+field.planets = planets;      // le rocce non nascono dentro un pianeta
+const dust = new Dust(R.scene);
 
 step(80, 'armamento e ostili');
 const weapons = new Weapons(R.scene);
-const enemies = new Enemies(R.scene, debris, audio);
+const enemies = new Enemies(R.scene, debris, audio, MODELS.raider);
 
 step(88, 'radar tattico');
 const radar = new Radar($('radar'));
@@ -81,7 +94,8 @@ const ui = {
   reticle: $('reticle'),
   menuBest: $('menu-best'),
   ovScore: $('ov-score'), ovKills: $('ov-kills'), ovRocks: $('ov-rocks'), ovTime: $('ov-time'), ovBest: $('ov-best'),
-  flash: $('flash'), warn: $('warn'),
+  flash: $('flash'), warn: $('warn'), pwarn: $('pwarn'), pwarnAlt: $('pwarn-alt'),
+  ovCause: $('ov-cause'),
   rContacts: $('r-contacts'), rPos: $('r-pos'),
   lead: $('lead'), tbox: $('tbox'),
 };
@@ -93,7 +107,16 @@ function setState(s) {
   ui.over.classList.toggle('on',  s === 'dead');
   ui.pause.classList.toggle('on', s === 'paused');
   ui.reticle.style.opacity = s === 'playing' ? '1' : '0';
-  if (s !== 'playing') { ui.lead.classList.remove('on'); ui.tbox.classList.remove('on'); }
+  // la cornice della cabina ha senso solo mentre si vola: sulla schermata
+  // di morte o nel menu è un pezzo di interfaccia rimasto acceso per sbaglio
+  document.body.classList.toggle('cockpit',
+    G.combat && (s === 'playing' || s === 'paused'));
+  if (s !== 'playing') {
+    ui.lead.classList.remove('on');
+    ui.tbox.classList.remove('on');
+    ui.warn.classList.remove('on');
+    ui.pwarn.classList.remove('on');
+  }
   document.body.style.cursor = s === 'playing' ? 'none' : 'default';
   if (s !== 'playing') audio.engine(0, false);
 }
@@ -120,12 +143,14 @@ function startGame() {
   setState('playing');
 }
 
-function die() {
+function die(cause) {
   audio.death();
   debris.burst(ship.pos, 260, {
     speed: 78, size: 1.5, life: 2.0, drag: 0.45,
     color: new THREE.Color(0xffd7a0), color2: new THREE.Color(0xff4a18)
   });
+  ui.pwarn.classList.remove('on');
+  ui.ovCause.textContent = cause || 'scafo ceduto sotto i colpi';
   G.best = Math.max(G.best, Math.round(G.score));
   localStorage.setItem('sr3d_best', String(G.best));
   ui.ovScore.textContent = Math.round(G.score).toLocaleString('it-IT');
@@ -304,9 +329,9 @@ const CAM = {
   lookAhead: 7.5,
   // COMBATTIMENTO — dentro la cabina, dietro il vetro. Campo visivo più
   // ampio per la consapevolezza, ritardo quasi nullo per la mira.
-  // Il punto di vista lo definisce ship.js, che lo usa anche per decidere
-  // quali pezzi dello scafo nascondere: deve essere lo stesso valore.
-  cockpit:   COCKPIT_EYE,
+  // Il punto di vista lo definisce ship.js (dipende dallo scafo: GLB o
+  // procedurale), che lo usa anche per decidere cosa nascondere.
+  cockpit:   ship.eyePos,
   cockRot:   22.0,   // inseguimento della rotazione: quasi istantaneo
   cockFov:   80,
   cockFovBoost: 96,
@@ -323,6 +348,8 @@ R.camera.position.copy(camPos);
 // scuotimento della camera, riusato per colpi ed esplosioni
 let shake = 0;
 const addShake = (v) => { shake = Math.min(1, shake + v); };
+// cadenza del cicalino di prossimità planetaria
+let pwarnBeep = 0;
 
 let last = performance.now();
 let fpsAcc = 0, fpsN = 0;
@@ -354,7 +381,11 @@ function frameBody(now) {
   else                               updateIdle(dt);
 
   // in pausa anche i detriti si fermano, altrimenti non è una pausa
-  if (G.state !== 'paused') debris.update(dt);
+  if (G.state !== 'paused') {
+    debris.update(dt);
+    scenery.update(dt);        // il disco del buco nero ruota
+    dust.update(R.camera.position);
+  }
   R.syncSky();
   R.updateShadow(ship.pos);
 
@@ -404,6 +435,7 @@ function updateIdle(dt) {
 
   field.update(ship.pos, dt);
   weapons.update(dt);
+  planets.update(dt);
 }
 
 // ─── partita ────────────────────────────────────────────────────────
@@ -448,8 +480,38 @@ function updatePlaying(dt) {
   for (let i = en.length - 1; i >= 0; i--) {
     if (en[i].pos.distanceTo(ship.pos) < 2.2) {
       en.splice(i, 1);
-      hurt(SENT.damage, false);
+      hurt(SENT.damage, false, 'abbattuto dalle sentinelle');
     }
+  }
+
+  // ── pianeti: prossimità e schianto ──
+  planets.update(dt);
+  const near = planets.probe(ship.pos);
+  if (near.altitude < 0) {
+    // dentro la superficie: schianto, senza appello. La nave viene
+    // riportata sulla superficie così l'esplosione (e la camera del dopo)
+    // restano fuori dal pianeta.
+    tmpV.copy(ship.pos).sub(near.planet.pos).normalize();
+    ship.pos.copy(near.planet.pos).addScaledVector(tmpV, near.planet.radius + 30);
+    ship.vel.set(0, 0, 0);
+    addShake(1);
+    die('schiantato sulla superficie di ' + near.planet.name);
+    return;
+  }
+  const closing = near.altitude < WARN_ALTITUDE;
+  ui.pwarn.classList.toggle('on', closing);
+  if (closing) {
+    ui.pwarnAlt.textContent = near.planet.name + ' · quota ' + Math.max(0, Math.round(near.altitude));
+    pwarnBeep += dt;
+    if (pwarnBeep > 1.1) { pwarnBeep = 0; audio.alarm(); }
+  }
+
+  // ── buco nero: attrazione e orizzonte degli eventi ──
+  const pull = scenery.pull(ship.pos, ship.vel, dt);
+  if (pull > 0.55) addShake(Math.min(0.4, (pull - 0.55) * 0.9 * dt * 30));
+  if (scenery.swallowed(ship.pos)) {
+    die('oltrepassato l\'orizzonte degli eventi');
+    return;
   }
 
   // ── urto contro le rocce ──
@@ -465,7 +527,7 @@ function updatePlaying(dt) {
     ship.pos.addScaledVector(tmpV, push);
     ship.vel.addScaledVector(tmpV, ship.speed * 0.5);
     ship.vel.multiplyScalar(0.5);
-    hurt(Math.min(38, 8 + hit.scale * 1.6), true);
+    hurt(Math.min(38, 8 + hit.scale * 1.6), true, 'sbriciolato contro un asteroide');
     debris.burst(ship.pos, 26, {
       speed: 24, size: 0.6, life: 0.5,
       color: new THREE.Color(0xffcf9a), color2: new THREE.Color(0xff7030)
@@ -478,7 +540,7 @@ function updatePlaying(dt) {
     tmpV.copy(ship.pos).sub(foe.pos).normalize();
     ship.pos.addScaledVector(tmpV, 4);
     ship.vel.addScaledVector(tmpV, 40);
-    hurt(22, true);
+    hurt(22, true, 'collisione con una sentinella');
   }
 
   // ── comparsa dei nemici, sempre più frequente ──
@@ -520,6 +582,11 @@ function updateCamera(dt) {
   // Inseguimento esterno
   tmpV.copy(CAM.offset).applyQuaternion(ship.quat).add(ship.pos);
   camPos.lerp(tmpV, 1 - Math.exp(-CAM.posLag * dt));
+  // Se la nave viene spinta ALL'INDIETRO (risucchio del buco nero, urti),
+  // il ritardo elastico fa entrare la camera dentro lo scafo: mai più
+  // vicina di così alla nave.
+  const dCam = camPos.distanceTo(ship.pos);
+  if (dCam < 7.5) camPos.sub(ship.pos).multiplyScalar(7.5 / dCam).add(ship.pos);
   R.camera.position.copy(camPos);
 
   camLook.copy(ship.forward).multiplyScalar(CAM.lookAhead).add(ship.pos);
@@ -599,14 +666,14 @@ function updateTargeting() {
   ui.lead.classList.remove('on');
 }
 
-function hurt(amount, heavy) {
+function hurt(amount, heavy, cause) {
   if (ship.invuln > 0) return;
   const dead = ship.damage(amount);
   audio.hit(heavy);
   addShake(heavy ? 0.75 : 0.4);
   ui.flash.style.opacity = heavy ? '0.5' : '0.3';
   setTimeout(() => { ui.flash.style.opacity = '0'; }, 90);
-  if (dead) die();
+  if (dead) die(cause);
   else if (ship.hull <= 30) audio.alarm();
 }
 
@@ -655,10 +722,10 @@ function updateHud(dt) {
   ui.menuBest.textContent = G.best.toLocaleString('it-IT');
 }
 
-addEventListener('resize', () => debris.resize());
+addEventListener('resize', () => { debris.resize(); dust.resize(); });
 requestAnimationFrame(frame);
 
 window.SR = {
-  R, ship, field, enemies, weapons, debris, audio, input, G, THREE, CAM, FLY, scenery, radar,
+  R, ship, field, enemies, weapons, debris, audio, input, G, THREE, CAM, FLY, scenery, radar, planets, dust,
   startGame, setState, setCombat, pauseGame, resumeGame, abandonMission, toggleFullscreen, toast, openSheet, closeSheet,
 };

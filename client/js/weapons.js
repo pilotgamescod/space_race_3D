@@ -82,16 +82,14 @@ export class Weapons {
     this.enemy.update(dt);
   }
 
-  // Sparo del giocatore dai due punti d'attacco sulle ali
+  // Sparo del giocatore dai punti d'arma dello scafo (per il GLB sono i
+  // nodi dei cannoni del modello, letti da ship.js)
   tryFire(ship, audio) {
     if (this.cool > 0) return false;
     this.cool = GUN.cooldown;
     const fwd = ship.forward;
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(ship.quat);
-    for (const s of [1, -1]) {
-      const o = ship.pos.clone()
-        .addScaledVector(right, s * 1.9)
-        .addScaledVector(fwd, 2.2);
+    for (const hp of ship.hardpoints) {
+      const o = hp.clone().applyQuaternion(ship.quat).add(ship.pos);
       const d = fwd.clone();
       d.x += (Math.random() - 0.5) * GUN.spread;
       d.y += (Math.random() - 0.5) * GUN.spread;

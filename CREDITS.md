@@ -23,19 +23,48 @@ https://ambientcg.com
 | `rock_a_*.jpg` | Rock064 (fotogrammetria) | superficie asteroidi, variante 1 e 3 |
 | `rock_b_*.jpg` | Rock063 (fotogrammetria) | superficie asteroidi, variante 2 |
 
+**Solar System Scope** — licenza **CC BY 4.0** (attribuzione richiesta,
+uso non commerciale e commerciale consentito)
+https://www.solarsystemscope.com/textures/
+Basate su dati e immagini NASA.
+
+| File in `client/assets/tex/planets/` | Uso |
+|---|---|
+| `2k_moon.jpg` | pianeta Vesta |
+| `2k_mars.jpg` | pianeta Rubra |
+| `2k_neptune.jpg` | pianeta Boreas |
+| `2k_jupiter.jpg` | pianeta Gorgon |
+| `2k_saturn.jpg`, `2k_saturn_ring_alpha.png` | pianeta Aureo e anelli |
+| `2k_venus_atmosphere.jpg` | pianeta Cinera |
+
 Mappe usate: colore (`_col`), normali (`_nrm`), rugosità (`_rgh`),
 occlusione ambientale (`_ao`). Scaricate a 1K, ridimensionate e ricompresse
 in JPEG per il web; le mappe di displacement e le normali in convenzione
 DirectX sono state scartate perché non utilizzate.
 
+## Modelli 3D
+
+**Space Pirates (Babylon.js)** — licenza **Apache 2.0**
+https://github.com/BabylonJS/SpacePirates
+Demo ufficiale del team Babylon.js per la release 5.0. Copia della
+licenza in `client/assets/models/LICENSE-SpacePirates.md`.
+
+| File in `client/assets/models/` | Uso |
+|---|---|
+| `valkyrie.glb` | navicella del giocatore |
+| `raider.glb` | sentinelle nemiche |
+
+Gli scafi procedurali originali (`js/ship.js`, `js/enemies.js`) restano
+come ripiego se i GLB non si caricano.
+
 ## Generato proceduralmente (nessun file esterno)
 
 - Pannellature, rivetti, usura e relative normal map dello scafo — `js/textures.js`
-- Superficie e atmosfera dei pianeti — `js/render.js`
-- Campo stellare, nebulose, mappa d'ambiente HDR — `js/render.js`
+- Atmosfere dei pianeti (shader fresnel) — `js/planets.js`
+- Campo stellare, nebulose, via lattea, mappa d'ambiente HDR, lens flare — `js/render.js`, `js/scenery.js`
 - Geometria degli asteroidi (rumore fBm a più ottave) — `js/field.js`
 - Navicelle del giocatore e nemiche — `js/ship.js`, `js/enemies.js`
-- Tutto l'audio, sintetizzato in Web Audio — `js/audio.js`
+- Tutto l'audio, effetti e musica ambient generativa in Web Audio — `js/audio.js`
 
 ## Nota
 

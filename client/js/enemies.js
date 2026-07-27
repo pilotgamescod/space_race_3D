@@ -7,6 +7,7 @@
 // ════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
 import { panelSet, glowTexture } from './textures.js';
+import { mergeStaticMeshes } from './ship.js';
 
 export const SENT = {
   hp:          4,
@@ -45,10 +46,15 @@ function shared() {
       normalScale: new THREE.Vector2(0.8, 0.8), ...rep(3, 3) }),
     trim:  new THREE.MeshStandardMaterial({ color: 0x8b8478, roughness: 0.44, metalness: 0.70 }),
     dark:  new THREE.MeshStandardMaterial({ color: 0x1c211f, roughness: 0.62, metalness: 0.30 }),
+    // varianti a doppia faccia condivise: clonarle per ogni nemico
+    // impedirebbe la fusione delle geometrie in un'unica draw call
+    darkDouble: new THREE.MeshStandardMaterial({ color: 0x1c211f, roughness: 0.62, metalness: 0.30, side: THREE.DoubleSide }),
     // marcatura d'unità: dà l'idea di un mezzo militare, non di un oggetto
     mark:  new THREE.MeshStandardMaterial({ color: 0x8c2a12, roughness: 0.55, metalness: 0.30 }),
     glowTex: glowTexture(128),
   };
+  SHARED.shellDouble = SHARED.shell.clone();
+  SHARED.shellDouble.side = THREE.DoubleSide;
   return SHARED;
 }
 
@@ -56,10 +62,15 @@ function shared() {
 // Punta lungo -Z locale, come la nave del giocatore. Doppia fusoliera con
 // carena centrale, muso sensore, quattro cannoni e due propulsori: deve
 // leggersi come un mezzo pilotato, non come un oggetto astratto.
-function buildMesh() {
-  const M = shared();
-  const g = new THREE.Group();
+//
+// Lo scafo statico è costruito UNA volta e fuso in poche geometrie (una
+// per materiale). Ogni nemico riusa geometrie e materiali del template:
+// 50 mesh a testa moltiplicate per sette nemici erano centinaia di draw
+// call. Restano per-nemico solo occhio e nuclei dei propulsori, che si
+// animano in modo indipendente.
+let TEMPLATE = null;
 
+function buildStatic(g, M) {
   // ── carena centrale ──
   const belly = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.25, 3.4, 6, 1), M.shell);
   belly.rotation.x = -Math.PI / 2; belly.rotation.z = Math.PI / 6;
@@ -78,30 +89,16 @@ function buildMesh() {
   prow.position.z = -2.6;
   g.add(prow);
 
-  // ── occhio: il sensore che si carica prima di sparare ──
-  const eyeMat = new THREE.MeshStandardMaterial({
-    color: 0x140303, emissive: 0xd41c08, emissiveIntensity: 1.3,
-    roughness: 0.16, metalness: 0.1, fog: false
-  });
-  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.34, 22, 14), eyeMat);
-  eye.position.set(0, 0.06, -3.35);
-  eye.scale.set(1.5, 0.85, 1);
-  g.add(eye);
   // cornice attorno all'occhio, come una palpebra corazzata
   const brow = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.08, 5, 18), M.trim);
   brow.position.set(0, 0.06, -3.3); brow.scale.set(1.4, 0.9, 1);
   g.add(brow);
 
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: M.glowTex,        // senza map lo sprite e' un QUADRATO pieno
-    color: 0xff5a30, transparent: true, opacity: 0.42,
-    blending: THREE.AdditiveBlending, depthWrite: false, fog: false
-  }));
-  glow.scale.setScalar(2.6);
-  glow.position.set(0, 0.06, -3.6);
-  g.add(glow);
+  // rumore deterministico: il template è unico, la minutaglia dev'essere
+  // uguale per tutti comunque
+  let seed = 4242;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
-  const rings = [];
   for (const s of [1, -1]) {
     // ── fusoliera laterale ──
     const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.52, 4.6, 8), M.shell);
@@ -130,8 +127,7 @@ function buildMesh() {
     const wingGeo = new THREE.ExtrudeGeometry(wing, {
       depth: 0.20, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 1
     });
-    const wingMat = M.shell.clone(); wingMat.side = THREE.DoubleSide;
-    const w = new THREE.Mesh(wingGeo, wingMat);
+    const w = new THREE.Mesh(wingGeo, M.shellDouble);
     w.rotation.x = -Math.PI / 2;
     w.rotation.z = s * -0.16;
     w.scale.x = s;
@@ -156,21 +152,10 @@ function buildMesh() {
     g.add(gunPod);
 
     // ── propulsore ──
-    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.34, 0.9, 10, 1, true), M.dark);
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.34, 0.9, 10, 1, true), M.darkDouble);
     nozzle.rotation.x = -Math.PI / 2;
     nozzle.position.set(s * 1.9, -0.10, 2.75);
-    nozzle.material = M.dark.clone(); nozzle.material.side = THREE.DoubleSide;
     g.add(nozzle);
-    // nucleo caldo del propulsore: emissivo, il bloom lo trasforma in luce
-    const glowMat = new THREE.MeshStandardMaterial({
-      color: 0x120604, emissive: 0xff5518, emissiveIntensity: 3.2,
-      roughness: 0.4, fog: false
-    });
-    const core = new THREE.Mesh(new THREE.CircleGeometry(0.33, 14), glowMat);
-    core.position.set(s * 1.9, -0.10, 3.16);
-    core.rotation.y = Math.PI;
-    g.add(core);
-    rings.push(core);   // riusati per pulsare col preavviso
 
     // marcature d'unità
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.30), M.mark);
@@ -180,9 +165,9 @@ function buildMesh() {
     // minutaglia tecnica sulla fusoliera
     for (let i = 0; i < 4; i++) {
       const bx = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14 + Math.random() * 0.18, 0.10, 0.20 + Math.random() * 0.26),
+        new THREE.BoxGeometry(0.14 + rnd() * 0.18, 0.10, 0.20 + rnd() * 0.26),
         i % 2 ? M.trim : M.dark);
-      bx.position.set(s * (1.75 + Math.random() * 0.3), 0.32, -1.6 + Math.random() * 3.4);
+      bx.position.set(s * (1.75 + rnd() * 0.3), 0.32, -1.6 + rnd() * 3.4);
       g.add(bx);
     }
   }
@@ -194,18 +179,115 @@ function buildMesh() {
     ant.rotation.z = s * 0.22; ant.rotation.x = 0.16;
     g.add(ant);
   }
+}
 
-  // ombre: i nemici proiettano e ricevono come tutto il resto
-  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+// ─── template dal modello GLB (Raider) ──────────────────────────────
+// Preparato una volta: geometrie e materiali CONDIVISI fra tutte le
+// sentinelle, con le trasformazioni dei nodi già cotte nelle matrici.
+// Il Raider è un solo scafo mesh: ogni nemico costa pochissime draw call.
+let GLB = null;
+function prepModel(model) {
+  if (GLB) return GLB;
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3());
+  const scale = 8.8 / size.z;
+  model.scale.setScalar(scale);
+  model.rotation.y = Math.PI;      // convenzione di gioco: -Z avanti
+  const shield = model.getObjectByName('raiderShield_mesh');
+  if (shield) shield.visible = false;
+  model.updateMatrixWorld(true);
+
+  const meshes = [];
+  model.traverse(o => {
+    if (o.isMesh && o.visible) meshes.push({ geo: o.geometry, mat: o.material, mtx: o.matrixWorld.clone() });
+  });
+  const np = (n) => {
+    const o = model.getObjectByName(n);
+    return o ? o.getWorldPosition(new THREE.Vector3()) : null;
+  };
+  const post = new THREE.Box3().setFromObject(model);
+  GLB = {
+    meshes,
+    thrusters: ['raider_thruster_L', 'raider_thruster_R'].map(np).filter(Boolean),
+    noseZ: post.min.z,
+  };
+  return GLB;
+}
+
+function buildMesh(model) {
+  const M = shared();
+  const g = new THREE.Group();
+
+  let nosePos, thrusterPos;
+  if (model) {
+    const T = prepModel(model);
+    for (const t of T.meshes) {
+      const m = new THREE.Mesh(t.geo, t.mat);
+      m.matrixAutoUpdate = false;
+      m.matrix.copy(t.mtx);
+      m.castShadow = m.receiveShadow = true;
+      g.add(m);
+    }
+    nosePos = new THREE.Vector3(0, 0.05, T.noseZ + 0.35);
+    thrusterPos = T.thrusters.map(p => p.clone().add(new THREE.Vector3(0, 0, 0.25)));
+  } else {
+    if (!TEMPLATE) {
+      const tg = new THREE.Group();
+      buildStatic(tg, M);
+      TEMPLATE = [...mergeStaticMeshes(tg).always.children];
+    }
+    // istanze leggere del template: geometria e materiale CONDIVISI
+    for (const t of TEMPLATE) {
+      const m = new THREE.Mesh(t.geometry, t.material);
+      m.castShadow = m.receiveShadow = true;
+      g.add(m);
+    }
+    nosePos = new THREE.Vector3(0, 0.06, -3.35);
+    thrusterPos = [new THREE.Vector3(1.9, -0.10, 3.16), new THREE.Vector3(-1.9, -0.10, 3.16)];
+  }
+
+  // ── occhio: il sensore che si carica prima di sparare (per-nemico) ──
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: 0x140303, emissive: 0xd41c08, emissiveIntensity: 1.3,
+    roughness: 0.16, metalness: 0.1, fog: false
+  });
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.34, 22, 14), eyeMat);
+  eye.position.copy(nosePos);
+  eye.scale.set(1.5, 0.85, 1);
+  g.add(eye);
+
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: M.glowTex,        // senza map lo sprite e' un QUADRATO pieno
+    color: 0xff5a30, transparent: true, opacity: 0.42,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false
+  }));
+  glow.scale.setScalar(2.6);
+  glow.position.copy(nosePos).add(new THREE.Vector3(0, 0, -0.3));
+  g.add(glow);
+
+  // nuclei caldi dei propulsori: emissivi e pulsanti, uno per lato
+  const rings = [];
+  for (const p of thrusterPos) {
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: 0x120604, emissive: 0xff5518, emissiveIntensity: 3.2,
+      roughness: 0.4, fog: false
+    });
+    const core = new THREE.Mesh(new THREE.CircleGeometry(0.33, 14), glowMat);
+    core.position.copy(p);
+    g.add(core);
+    rings.push(core);   // riusati per pulsare col preavviso
+  }
 
   return { group: g, eyeMat, glow, rings };
 }
 
 export class Enemies {
-  constructor(scene, debris, audio) {
+  /** model: scena GLB del Raider, oppure null → sentinelle procedurali */
+  constructor(scene, debris, audio, model = null) {
     this.scene = scene;
     this.debris = debris;
     this.audio = audio;
+    this.model = model;
     this.list = [];
     this._tmp = new THREE.Vector3();
     this._q = new THREE.Quaternion();
@@ -213,7 +295,7 @@ export class Enemies {
   }
 
   spawnNear(pos, forward, rng = Math.random) {
-    const parts = buildMesh();
+    const parts = buildMesh(this.model);
     // compaiono davanti, di lato, a distanza di avvistamento
     const off = new THREE.Vector3(
       (rng() - 0.5) * 340,
@@ -330,8 +412,19 @@ export class Enemies {
     });
     if (this.audio) this.audio.explosion(1.5);
     this.scene.remove(e.group);
-    e.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    this._disposeOwn(e.group);
     this.list.splice(i, 1);
+  }
+
+  // Libera solo le geometrie proprie del nemico (occhio, nuclei): quelle
+  // del template (procedurale o GLB) sono condivise da tutti i nemici e
+  // distruggerle romperebbe gli altri.
+  _disposeOwn(group) {
+    const shared = new Set(TEMPLATE ? TEMPLATE.map(t => t.geometry) : []);
+    if (GLB) for (const t of GLB.meshes) shared.add(t.geo);
+    group.traverse(o => {
+      if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
+    });
   }
 
   // Il nemico che sta toccando il giocatore, se c'è
@@ -345,7 +438,7 @@ export class Enemies {
   clear() {
     for (const e of this.list) {
       this.scene.remove(e.group);
-      e.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+      this._disposeOwn(e.group);
     }
     this.list.length = 0;
   }

@@ -3,7 +3,52 @@
 //  Convenzione: la nave punta lungo -Z locale (come la camera di Three).
 // ════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { panelSet, techSet } from './textures.js';
+
+// ─── fusione delle mesh statiche ────────────────────────────────────
+// Una nave fatta di ~140 mesh separate costa ~140 draw call, che con la
+// passata delle ombre raddoppiano: era la prima causa dei 33 fps. Tutti i
+// pezzi che non si animano vengono fusi in UNA geometria per materiale
+// (una decina di draw call in tutto). Restano separati solo i pezzi con
+// scala animata (le fiammate) — i materiali emissivi animati (motori,
+// strisce) sono condivisi, quindi i loro pezzi si possono fondere lo stesso.
+//
+// La partizione è doppia: pezzi sempre visibili e pezzi da nascondere
+// nella vista in cabina, così setCockpitView spegne un gruppo solo.
+export function mergeStaticMeshes(group, { skip = new Set(), hidden = new Set() } = {}) {
+  const buckets = new Map();
+  const toRemove = [];
+  group.traverse(o => {
+    if (!o.isMesh || skip.has(o)) return;
+    o.updateMatrix();
+    const part = hidden.has(o) ? 1 : 0;
+    const key = o.material.uuid + ':' + part;
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, b = { mat: o.material, part, geos: [] });
+    // tutte non indicizzate: mergeGeometries non mescola i due tipi
+    const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    geo.applyMatrix4(o.matrix);
+    // solo gli attributi comuni: geometrie diverse ne hanno set diversi
+    for (const name of Object.keys(geo.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') geo.deleteAttribute(name);
+    }
+    b.geos.push(geo);
+    toRemove.push(o);
+  });
+  for (const m of toRemove) m.parent.remove(m);
+
+  const always = new THREE.Group();
+  const hiddenGroup = new THREE.Group();
+  for (const b of buckets.values()) {
+    const mesh = new THREE.Mesh(mergeGeometries(b.geos), b.mat);
+    mesh.castShadow = mesh.receiveShadow = true;
+    (b.part ? hiddenGroup : always).add(mesh);
+    for (const g of b.geos) g.dispose();
+  }
+  group.add(always, hiddenGroup);
+  return { always, hidden: hiddenGroup };
+}
 
 // ─── parametri di volo (le manopole del "come si sente") ───────────
 export const FLY = {
@@ -43,7 +88,8 @@ export const COMBAT = {
 };
 
 export class Ship {
-  constructor() {
+  /** model: scena GLB della Valkyrie, oppure null → scafo procedurale */
+  constructor(model = null) {
     this.group = new THREE.Group();
     this.pos   = new THREE.Vector3(0, 0, 0);
     this.quat  = new THREE.Quaternion();
@@ -60,7 +106,96 @@ export class Ship {
     // velocità angolari correnti (inseguono i comandi con smorzamento)
     this._yaw = 0; this._pitch = 0; this._roll = 0;
 
-    this._build();
+    if (model) this._buildFromModel(model);
+    else       this._build();
+  }
+
+  // ─── scafo dal modello GLB (Valkyrie) ─────────────────────────────
+  // Lo scafo arriva già texturizzato; qui si aggiunge solo ciò che il
+  // modello non ha: fiammate, luce dei motori, punti d'arma e punto di
+  // vista del pilota. Le posizioni NON sono numeri a mano: si leggono
+  // dai nodi nominati dentro al GLB (thruster, cannon), così restano
+  // giuste anche cambiando scala.
+  _buildFromModel(model) {
+    const g = this.group;
+    const hull = model;
+
+    // scala: il modello è lungo ~0.26 unità, la nave di gioco ~7.5
+    const box = new THREE.Box3().setFromObject(hull);
+    const size = box.getSize(new THREE.Vector3());
+    const scale = 7.5 / size.z;
+    hull.scale.setScalar(scale);
+    // il GLB punta verso +Z: la convenzione di gioco è -Z avanti
+    hull.rotation.y = Math.PI;
+    g.add(hull);
+    this.hullRoot = hull;
+
+    // scudo e reticolo fanno parte del demo originale, qui non servono
+    for (const name of ['valkyrieShield_mesh', 'valkyrie_reticle']) {
+      const n = hull.getObjectByName(name);
+      if (n) n.visible = false;
+    }
+
+    // materiali con emissivo (nuclei motori, luci di scafo): sono loro
+    // che il bloom accende. Tenuti da parte per pulsare con la potenza.
+    this.hullMats = [];
+    hull.traverse((o) => {
+      if (o.isMesh && o.material && o.material.emissiveMap && !this.hullMats.includes(o.material)) {
+        this.hullMats.push(o.material);
+      }
+    });
+
+    // posizione di un nodo del GLB nel sistema della NAVE (gruppo a
+    // riposo nell'origine: il world coincide con il locale del gruppo)
+    g.updateMatrixWorld(true);
+    const nodePos = (name) => {
+      const n = hull.getObjectByName(name);
+      if (!n) return null;
+      return n.getWorldPosition(new THREE.Vector3());
+    };
+
+    // ── fiammate e luce sui propulsori veri del modello ──
+    this.flames = [];
+    this.cores = [];
+    const thrusters = ['valkyrie_thruster_L1', 'valkyrie_thruster_L2',
+                       'valkyrie_thruster_R1', 'valkyrie_thruster_R2']
+      .map(nodePos).filter(Boolean);
+    for (const p of thrusters) {
+      const fl = new THREE.Mesh(
+        new THREE.ConeGeometry(0.16, 1.6, 12, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: 0x4ec4f5, transparent: true, opacity: 0.30, fog: false,
+          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+        })
+      );
+      fl.rotation.x = Math.PI / 2;
+      fl.position.copy(p).add(new THREE.Vector3(0, 0, 0.9));
+      g.add(fl);
+      this.flames.push(fl);
+    }
+    const back = thrusters.length
+      ? thrusters.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(thrusters.length)
+      : new THREE.Vector3(0, 0, 3);
+    this.engineLight = new THREE.PointLight(0x49c8ff, 0, 26, 2);
+    this.engineLight.position.copy(back).add(new THREE.Vector3(0, 0, 2.2));
+    g.add(this.engineLight);
+
+    // ── punti d'arma dai nodi dei cannoni ──
+    this.hardpoints = [];
+    for (const name of ['valkyrie_cannon_L', 'valkyrie_cannon_R']) {
+      const p = nodePos(name);
+      if (p) this.hardpoints.push(p.add(new THREE.Vector3(0, 0, -0.8)));
+    }
+    if (this.hardpoints.length === 0) {
+      this.hardpoints.push(new THREE.Vector3(-1.5, 0, -2), new THREE.Vector3(1.5, 0, -2));
+    }
+
+    // ── punto di vista del pilota ──
+    // Appena sopra la linea del tettuccio, come per lo scafo procedurale:
+    // da lì si vedono muso e ali senza che la fusoliera tagli lo schermo.
+    this.eyePos = new THREE.Vector3(0, box.max.y * scale + 0.34, -0.9);
+
+    g.position.copy(this.pos);
   }
 
   _build() {
@@ -387,6 +522,17 @@ export class Ship {
 
     this._markCockpitBlockers();
 
+    // fusione: da ~140 draw call a ~12. Le fiammate restano separate
+    // (hanno la scala animata); cabina e pezzi che ingombrano la vista
+    // dal cockpit finiscono nel gruppo "hidden", spento da setCockpitView.
+    const hidden = new Set(this.cockpitHidden);
+    hidden.add(this.canopy);
+    hidden.add(this.frameArc);
+    const merged = mergeStaticMeshes(g, { skip: new Set(this.flames), hidden });
+    this.staticHidden = merged.hidden;
+
+    this.eyePos = COCKPIT_EYE.clone();
+
     g.position.copy(this.pos);
   }
 
@@ -419,10 +565,9 @@ export class Ship {
   }
 
   // Applica o toglie la vista dalla cabina ai pezzi dello scafo.
+  // Dopo la fusione basta spegnere il gruppo dei pezzi ingombranti.
   setCockpitView(on) {
-    if (this.canopy)   this.canopy.visible   = !on;
-    if (this.frameArc) this.frameArc.visible = !on;
-    for (const m of this.cockpitHidden) m.visible = !on;
+    if (this.staticHidden) this.staticHidden.visible = !on;
   }
 
   // ─── modello di volo ────────────────────────────────────────────
@@ -487,13 +632,22 @@ export class Ship {
       fl.material.opacity = 0.10 + lvl * 0.30;
       fl.material.color.setHex(this.boosting ? 0x9adcff : 0x4ec4f5);
     }
-    this.coreMat.emissiveIntensity = 2.4 + lvl * 5.5;   // sopra la soglia del bloom
-    this.coreMat.emissive.setHex(this.boosting ? 0x9fe4ff : 0x36bfff);
     this.engineLight.intensity = lvl * (this.boosting ? 22 : 9);
     this.engineLight.color.setHex(this.boosting ? 0xaee6ff : 0x49c8ff);
-    // le strisce di scafo seguono la potenza, più tenui dei motori
-    this.stripMat.emissiveIntensity = 1.6 + lvl * 3.2;
-    this.stripMat.emissive.setHex(this.boosting ? 0x8fd8ff : 0x2ba8ff);
+    if (this.coreMat) {
+      this.coreMat.emissiveIntensity = 2.4 + lvl * 5.5;   // sopra la soglia del bloom
+      this.coreMat.emissive.setHex(this.boosting ? 0x9fe4ff : 0x36bfff);
+    }
+    if (this.stripMat) {
+      // le strisce di scafo seguono la potenza, più tenui dei motori
+      this.stripMat.emissiveIntensity = 1.6 + lvl * 3.2;
+      this.stripMat.emissive.setHex(this.boosting ? 0x8fd8ff : 0x2ba8ff);
+    }
+    if (this.hullMats) {
+      // il GLB ha gli emissivi (nuclei motori, luci) dentro una texture:
+      // basta modulare l'intensità del materiale per farli respirare
+      for (const m of this.hullMats) m.emissiveIntensity = 1.3 + lvl * 3.5;
+    }
   }
 
   // Danno allo scafo. Ritorna true se la nave è distrutta.

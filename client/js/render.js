@@ -13,6 +13,7 @@ import { FilmPass }         from 'three/addons/postprocessing/FilmPass.js';
 import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass }         from 'three/addons/postprocessing/GTAOPass.js';
 import { SMAAPass }         from 'three/addons/postprocessing/SMAAPass.js';
+import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 
 export const FOV_BASE  = 64;
 export const FOV_BOOST = 82;
@@ -25,12 +26,15 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({
       canvas, antialias: true, powerPreference: 'high-performance', stencil: false
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Tetto a 1.5, non 2: su uno schermo retina il quadro passa da 4.8 a
+    // 2.7 megapixel e il GTAO smette di divorare il frame. La differenza
+    // visiva è quasi nulla (c'è SMAA in coda), quella sui gli FPS enorme.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(innerWidth, innerHeight);
     // ACES + esposizione: è ciò che dà l'aria "girata con una macchina da presa"
     // invece di "disegnata". Senza tone mapping gli emissivi bruciano piatti.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 1.18;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -46,7 +50,7 @@ export class Renderer {
     this._buildLights();
     this._buildEnvironment();
     this._buildSky();
-    this._buildPlanet();
+    this._buildFlare();
     this._buildComposer();
 
     addEventListener('resize', () => this.resize());
@@ -76,11 +80,18 @@ export class Renderer {
     this.star.shadow.normalBias = 0.04;   // evita l'acne d'ombra sulle rocce
     sc.updateProjectionMatrix();
 
-    // Riempimento minimo, freddo: nello spazio la luce di rimbalzo è quasi
-    // nulla, ma a zero le facce in ombra diventano nero assoluto e la forma
-    // 3D si perde. Questo è il compromesso che tiene leggibile la silhouette.
-    this.fill = new THREE.HemisphereLight(0x2a4a7a, 0x05070c, 0.34);
+    // Riempimento freddo: nello spazio la luce di rimbalzo è quasi nulla,
+    // ma a zero le facce in ombra diventano nero assoluto e la forma 3D si
+    // perde. Alzato da 0.34: la nave nel menu era una silhouette illeggibile.
+    this.fill = new THREE.HemisphereLight(0x35578c, 0x0a0d14, 0.55);
     this.scene.add(this.fill);
+
+    // Controluce tenue dalla parte opposta alla stella: stacca il bordo in
+    // ombra della nave dal nero del fondo. È il rim light da studio, portato
+    // a un livello da "riflesso di nebulosa" per non sembrare artificiale.
+    this.rim = new THREE.DirectionalLight(0x6a86c8, 0.5);
+    this.rim.position.copy(this.starDir).multiplyScalar(-1000);
+    this.scene.add(this.rim);
   }
 
   // ─── environment map ────────────────────────────────────────────
@@ -267,73 +278,43 @@ export class Renderer {
     return t;
   }
 
-  // ─── pianeta lontano, per dare scala ────────────────────────────
-  _buildPlanet() {
-    const R = 1400;
-    this.planet = new THREE.Group();
-    this.planet.position.set(-5200, -900, -8600);
+  // ─── lens flare del sole ────────────────────────────────────────
+  // Guardando verso la stella compaiono i riflessi interni dell'obiettivo.
+  // È un artefatto fotografico, e proprio per questo vende il realismo:
+  // il cervello lo associa a "ripresa vera". Le texture sono generate.
+  _buildFlare() {
+    const disc = (stops) => {
+      const S = 128, cv = document.createElement('canvas');
+      cv.width = cv.height = S;
+      const x = cv.getContext('2d');
+      const g = x.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+      for (const [o, c] of stops) g.addColorStop(o, c);
+      x.fillStyle = g; x.fillRect(0, 0, S, S);
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const main = disc([[0, 'rgba(255,246,230,1)'], [0.25, 'rgba(255,236,205,0.5)'],
+                       [0.5, 'rgba(255,220,170,0.12)'], [1, 'rgba(255,220,170,0)']]);
+    // dischi soffusi, non anelli: gli anelli si leggevano come ciambelle
+    // fluttuanti, un difetto invece di un riflesso
+    const ghost = disc([[0, 'rgba(180,215,255,0.30)'], [0.55, 'rgba(180,215,255,0.10)'],
+                        [1, 'rgba(180,215,255,0)']]);
 
-    const body = new THREE.Mesh(
-      new THREE.SphereGeometry(R, 96, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x6b5a4a, roughness: 0.92, metalness: 0.0,
-        map: this._planetTexture(), fog: false
-      })
-    );
-    this.planet.add(body);
+    // Solo due riflessi interni, piccoli e scuri: nella prima versione
+    // erano quattro anelli accesi che sembravano un errore di rendering,
+    // non un artefatto d'obiettivo.
+    const flare = new Lensflare();
+    flare.addElement(new LensflareElement(main, 420, 0));
+    flare.addElement(new LensflareElement(ghost, 46, 0.45, new THREE.Color(0x2a3f56)));
+    flare.addElement(new LensflareElement(ghost, 88, 0.78, new THREE.Color(0x25404e)));
 
-    // Atmosfera: guscio con fresnel. È il dettaglio che fa leggere la
-    // sfera come un mondo invece che come una palla texturizzata.
-    const atmo = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.055, 96, 64),
-      new THREE.ShaderMaterial({
-        transparent: true, side: THREE.BackSide, depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        uniforms: { uLight: { value: this.star.position.clone().normalize() } },
-        vertexShader: `
-          varying vec3 vN; varying vec3 vW;
-          void main() {
-            vN = normalize(normalMatrix * normal);
-            vW = normalize((modelMatrix * vec4(position,1.0)).xyz - cameraPosition);
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-          }`,
-        fragmentShader: `
-          varying vec3 vN; varying vec3 vW;
-          uniform vec3 uLight;
-          void main() {
-            float fres = pow(1.0 - abs(dot(vN, vW)), 2.6);
-            float lit  = max(dot(normalize(vN), normalize(uLight)), 0.0);
-            vec3  col  = mix(vec3(0.18,0.36,0.72), vec3(0.62,0.78,1.0), lit);
-            gl_FragColor = vec4(col * fres * (0.30 + lit * 0.95), fres * 0.85);
-          }`
-      })
-    );
-    this.planet.add(atmo);
-    this.scene.add(this.planet);
-  }
-
-  _planetTexture() {
-    const W = 1024, H = 512, cv = document.createElement('canvas');
-    cv.width = W; cv.height = H;
-    const x = cv.getContext('2d');
-    x.fillStyle = '#4e4238'; x.fillRect(0, 0, W, H);
-    // fasce latitudinali + macchie: legge come un mondo roccioso/desertico
-    for (let i = 0; i < 26; i++) {
-      const y = Math.random() * H, h = 6 + Math.random() * 46;
-      x.fillStyle = `rgba(${120+Math.random()*70|0},${95+Math.random()*55|0},${72+Math.random()*45|0},${0.10+Math.random()*0.18})`;
-      x.fillRect(0, y, W, h);
-    }
-    for (let i = 0; i < 700; i++) {
-      const r = 2 + Math.random() * 24;
-      x.beginPath();
-      x.arc(Math.random()*W, Math.random()*H, r, 0, Math.PI*2);
-      x.fillStyle = `rgba(${40+Math.random()*130|0},${34+Math.random()*100|0},${28+Math.random()*80|0},${0.05+Math.random()*0.16})`;
-      x.fill();
-    }
-    const t = new THREE.CanvasTexture(cv);
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.wrapS = THREE.RepeatWrapping;
-    return t;
+    // Ancorato al cielo nella direzione della stella: essendo dentro
+    // skyGroup segue la camera e resta "a infinito" come il sole.
+    const anchor = new THREE.Object3D();
+    anchor.position.copy(this.starDir).multiplyScalar(13800);
+    anchor.add(flare);
+    this.skyGroup.add(anchor);
   }
 
   // ─── post-processing ────────────────────────────────────────────

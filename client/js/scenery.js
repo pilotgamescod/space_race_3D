@@ -38,7 +38,7 @@ export class Scenery {
     this._galaxy();
     this._blackHole();
     this._distantSun();
-    this._debrisBelt();
+    this._milkyWay();
   }
 
   // ─── costellazioni ───────────────────────────────────────────────
@@ -48,7 +48,7 @@ export class Scenery {
   _constellations() {
     const R = 15200;
     const r = rng(90210);
-    const starPos = [], linePos = [];
+    const starPos = [];
 
     const NUM = 7;
     for (let c = 0; c < NUM; c++) {
@@ -59,7 +59,6 @@ export class Scenery {
       const ey = new THREE.Vector3().crossVectors(centre, ex).normalize();
 
       const n = 5 + Math.floor(r() * 4);
-      const pts = [];
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2 + r() * 0.9;
         const rad = (0.05 + r() * 0.16);           // apertura angolare
@@ -67,39 +66,26 @@ export class Scenery {
           .addScaledVector(ex, Math.cos(a) * rad)
           .addScaledVector(ey, Math.sin(a) * rad)
           .normalize().multiplyScalar(R);
-        pts.push(d);
         starPos.push(d.x, d.y, d.z);
-      }
-      // le collego a catena, non tutte con tutte: sembra una figura
-      for (let i = 0; i < pts.length - 1; i++) {
-        linePos.push(pts[i].x, pts[i].y, pts[i].z);
-        linePos.push(pts[i+1].x, pts[i+1].y, pts[i+1].z);
-      }
-      if (r() < 0.5) {   // qualcuna si chiude su sé stessa
-        const a = pts[pts.length-1], b = pts[0];
-        linePos.push(a.x, a.y, a.z, b.x, b.y, b.z);
       }
     }
 
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
     const stars = new THREE.Points(sg, new THREE.PointsMaterial({
-      color: 0xcfe4ff, size: 5.2, sizeAttenuation: false,
+      // senza map i Points sono QUADRATI pieni: con l'esposizione alzata
+      // si vedevano come coriandoli bianchi squadrati
+      map: this._radialTex(0xffffff),
+      color: 0xcfe4ff, size: 6.5, sizeAttenuation: false,
       transparent: true, opacity: 0.95, depthWrite: false,
       blending: THREE.AdditiveBlending, fog: false,
     }));
     stars.frustumCulled = false;
     this.sky.add(stars);
 
-    const lg = new THREE.BufferGeometry();
-    lg.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
-    const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
-      color: 0x5f86b8, transparent: true, opacity: 0.13,
-      depthWrite: false, fog: false,
-    }));
-    lines.frustumCulled = false;
-    this.sky.add(lines);
-    this.constellationLines = lines;
+    // Le linee di collegamento sono state tolte: sullo schermo si leggevano
+    // come poligoni fluttuanti, un glitch più che una costellazione. Le
+    // stelle luminose da sole bastano a dare punti di riferimento.
   }
 
   // ─── galassia a spirale ──────────────────────────────────────────
@@ -196,6 +182,31 @@ export class Scenery {
     G.rotation.set(0.55, 0.3, 0.15);
     this.scene.add(G);
     this.blackHole = G;
+
+    // Il buco nero non è più un fondale: ha un pozzo gravitazionale.
+    // Dentro holePull la nave viene tirata verso il centro, oltre
+    // l'orizzonte non si torna indietro. Vedi pull() e swallowed().
+    this.holePos = G.position;
+    this.holeHorizon = 300;      // raggio di non ritorno
+    this.holePullRange = 4200;   // da qui in poi si sente il tiro
+  }
+
+  /** Accelerazione gravitazionale del buco nero sulla posizione data.
+   *  Applicarla a ship.vel: cresce col quadrato dell'avvicinamento. */
+  pull(pos, vel, dt) {
+    const d = this._pv ??= new THREE.Vector3();
+    d.copy(this.holePos).sub(pos);
+    const dist = d.length();
+    if (dist > this.holePullRange) return 0;
+    const t = 1 - dist / this.holePullRange;      // 0 al bordo, 1 al centro
+    const a = 90 * t * t;                         // u/s², brutale solo vicino
+    vel.addScaledVector(d.normalize(), a * dt);
+    return t;                                     // intensità, per HUD/audio
+  }
+
+  /** true se la posizione è oltre l'orizzonte degli eventi */
+  swallowed(pos) {
+    return pos.distanceTo(this.holePos) < this.holeHorizon;
   }
 
   // ─── sole lontano ────────────────────────────────────────────────
@@ -225,29 +236,60 @@ export class Scenery {
     this.sky.add(halo);
   }
 
-  // ─── cintura di detriti lontana ──────────────────────────────────
-  // Una fascia di puntini che attraversa il cielo: dà un orizzonte, un senso
-  // di "piano" della galassia, e rompe la simmetria del nero.
-  _debrisBelt() {
-    const r = rng(777), N = 1800;
+  // ─── via lattea ──────────────────────────────────────────────────
+  // Una fascia densa di stelle minute che attraversa tutto il cielo, come
+  // il piano galattico visto da dentro. Sostituisce la vecchia cintura di
+  // puntini radi, che sembrava sporcizia sullo schermo più che un cielo.
+  _milkyWay() {
+    const r = rng(777), N = 9000;
+    const R = 14800;
     const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const c = new THREE.Color();
+
     for (let i = 0; i < N; i++) {
       const a = r() * Math.PI * 2;
-      const rad = 11000 + r() * 3000;
-      pos[i*3]   = Math.cos(a) * rad;
-      pos[i*3+1] = (r() - 0.5) * 900;
-      pos[i*3+2] = Math.sin(a) * rad;
+      // spessore gaussiano attorno al piano: densa al centro, sfumata ai lati
+      const lat = (r() + r() + r() + r() - 2) * 0.14;
+      const y = Math.sin(lat), s = Math.cos(lat);
+      pos[i*3]   = Math.cos(a) * s * R;
+      pos[i*3+1] = y * R;
+      pos[i*3+2] = Math.sin(a) * s * R;
+      // polvere calda verso il "centro galattico", stelle fredde altrove
+      const warm = Math.pow(Math.max(0, Math.cos(a - 0.8)), 2);
+      c.setHSL(0.085 + (1 - warm) * 0.5, 0.25 + warm * 0.3, 0.45 + r() * 0.35);
+      const dim = 0.22 + r() * 0.5;
+      col[i*3] = c.r * dim; col[i*3+1] = c.g * dim; col[i*3+2] = c.b * dim;
     }
+
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
     const belt = new THREE.Points(g, new THREE.PointsMaterial({
-      color: 0x9fb4c8, size: 2.2, sizeAttenuation: false,
-      transparent: true, opacity: 0.30, depthWrite: false,
+      map: this._radialTex(0xffffff),   // punti tondi, non quadrati
+      size: 2.2, sizeAttenuation: false, vertexColors: true,
+      transparent: true, opacity: 0.8, depthWrite: false,
       blending: THREE.AdditiveBlending, fog: false,
     }));
     belt.frustumCulled = false;
-    belt.rotation.set(0.28, 0, 0.16);
+    belt.rotation.set(0.28, 0, 0.42);
     this.sky.add(belt);
+
+    // bagliore diffuso lungo la fascia: poche macchie tenui allungate
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + r() * 0.5;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this._radialTex(0xffffff),
+        color: new THREE.Color().setHSL(0.08 + r() * 0.5, 0.4, 0.5),
+        transparent: true, opacity: 0.05 + r() * 0.05,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      }));
+      const p = new THREE.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)
+        .applyEuler(new THREE.Euler(0.28, 0, 0.42));
+      sp.position.copy(p);
+      sp.scale.setScalar(2600 + r() * 2400);
+      this.sky.add(sp);
+    }
   }
 
   _radialTex(hex) {

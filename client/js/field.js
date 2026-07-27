@@ -55,6 +55,7 @@ export class Field {
     this.free   = [];             // frammenti liberi, non legati a un settore
     this.dead   = new Set();      // id delle rocce distrutte (persistono)
     this.rocks  = [];             // tutte le rocce attive di questo frame
+    this.planets = null;          // impostato da main.js: zone di esclusione
 
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();
@@ -224,6 +225,8 @@ export class Field {
       r.id = id;
       // salta le rocce già distrutte: se il settore si ricarica non tornano
       if (this.dead.has(id)) continue;
+      // niente rocce dentro (o conficcate nel bordo di) un pianeta
+      if (this.planets && this.planets.contains(pos, r.radius + 40)) continue;
       list.push(r);
     }
     return list;
